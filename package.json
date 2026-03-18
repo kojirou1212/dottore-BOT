@@ -1,0 +1,17 @@
+{
+  "name": "discord-ai-bot",
+  "version": "1.0.0",
+  "description": "Claude AIを使ったDiscord対話Bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "discord.js": "^14.16.3",
+    "openai": "^6.32.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
