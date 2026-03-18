@@ -21,8 +21,8 @@ if (!config.discord.token || config.discord.token === "YOUR_DISCORD_BOT_TOKEN") 
   console.error("[Bot] config.json に有効な Discord トークンを設定してください。");
   process.exit(1);
 }
-if (!config.openai.apiKey || config.openai.apiKey === "YOUR_ANTHROPIC_API_KEY") {
-  console.error("[Bot] config.json に有効な Anthropic API キーを設定してください。");
+if (!config.gemini.apiKey || config.gemini.apiKey === "YOUR_GEMINI_API_KEY") {
+  console.error("[Bot] config.json に有効な Gemini API キーを設定してください。");
   process.exit(1);
 }
 

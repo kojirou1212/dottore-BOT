@@ -1,10 +1,10 @@
 // ai-handler.js
-const OpenAI = require("openai");
+const { GoogleGenAI } = require("@google/genai");
 
 class AIHandler {
   constructor(config) {
     this.config = config;
-    this.client = new OpenAI({ apiKey: config.openai.apiKey });
+    this.client = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     this.conversationHistory = new Map();
   }
 
@@ -22,25 +22,33 @@ class AIHandler {
   async generateResponse(userId, userMessage) {
     const history = this.getHistory(userId);
 
-    history.push({ role: "user", content: userMessage });
+    // Gemini形式: role は "user" / "model"
+    history.push({ role: "user", parts: [{ text: userMessage }] });
 
-    const maxLen = this.config.openai.maxHistoryLength;
+    const maxLen = this.config.gemini.maxHistoryLength;
     while (history.length > maxLen) {
       history.shift();
     }
 
     try {
-      const response = await this.client.chat.completions.create({
-        model: this.config.openai.model,
-        max_tokens: this.config.openai.maxTokens,
-        messages: [
-          { role: "system", content: this.config.ai.systemPrompt },
-          ...history,
-        ],
+      // 最後のユーザーメッセージを除いた部分をhistoryとして渡す
+      const chatHistory = history.slice(0, -1);
+
+      const chat = this.client.chats.create({
+        model: this.config.gemini.model,
+        config: {
+          systemInstruction: this.config.ai.systemPrompt,
+          maxOutputTokens: this.config.gemini.maxTokens,
+        },
+        history: chatHistory,
       });
 
-      const assistantMessage = response.choices[0].message.content;
-      history.push({ role: "assistant", content: assistantMessage });
+      const response = await chat.sendMessage({
+        message: userMessage,
+      });
+
+      const assistantMessage = response.text;
+      history.push({ role: "model", parts: [{ text: assistantMessage }] });
       return assistantMessage;
 
     } catch (error) {

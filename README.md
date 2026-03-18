@@ -1,12 +1,12 @@
 # Discord AI Bot
 
-Claude AIを使った対話型Discordボットです。
+Gemini AIを使った対話型Discordボットです。
 
 ## ファイル構成
 
 ```
 ├── bot.js          # メインエントリーポイント
-├── ai-handler.js   # Claude API 通信・会話履歴管理
+├── ai-handler.js   # Gemini API 通信・会話履歴管理
 ├── config.json     # 設定ファイル（トークン・プロンプト等）
 └── package.json    # 依存パッケージ定義
 ```
@@ -18,16 +18,38 @@ Claude AIを使った対話型Discordボットです。
 npm install
 ```
 
-### 2. config.json の編集
+### 2. config.json の作成
+
+`config.json` を以下の内容で作成してください。
+
+```json
+{
+  "discord": {
+    "token": "YOUR_DISCORD_BOT_TOKEN",
+    "targetChannelIds": ["YOUR_CHANNEL_ID"]
+  },
+  "gemini": {
+    "apiKey": "YOUR_GEMINI_API_KEY",
+    "model": "gemini-2.0-flash",
+    "maxTokens": 1000,
+    "maxHistoryLength": 20
+  },
+  "ai": {
+    "systemPrompt": "あなたは親切なアシスタントです。",
+    "errorMessage": "エラーが発生しました。しばらくしてからもう一度お試しください。",
+    "typingIndicator": true
+  }
+}
+```
 
 | キー | 説明 |
 |------|------|
 | `discord.token` | Discord Bot のトークン |
 | `discord.targetChannelIds` | 監視するチャンネルID（複数可） |
-| `anthropic.apiKey` | Anthropic API キー |
-| `anthropic.model` | 使用するモデル名 |
-| `anthropic.maxTokens` | 1回の返答の最大トークン数 |
-| `anthropic.maxHistoryLength` | 保持する会話履歴の最大件数 |
+| `gemini.apiKey` | Gemini API キー（[Google AI Studio](https://aistudio.google.com/apikey) で取得） |
+| `gemini.model` | 使用するモデル名（例: `gemini-2.0-flash`, `gemini-2.5-pro`） |
+| `gemini.maxTokens` | 1回の返答の最大トークン数 |
+| `gemini.maxHistoryLength` | 保持する会話履歴の最大件数 |
 | `ai.systemPrompt` | AIへのシステムプロンプト（キャラクター設定など） |
 | `ai.errorMessage` | エラー時にDiscordへ送信するメッセージ |
 | `ai.typingIndicator` | 返答中のタイピング表示 ON/OFF |
@@ -56,6 +78,13 @@ npm start
 ```json
 "ai": {
   "systemPrompt": "あなたはゲームサーバーのサポート担当です。ゲームのルールや操作方法を丁寧に教えてください。"
+}
+```
+
+### モデルの変更
+```json
+"gemini": {
+  "model": "gemini-2.5-pro"
 }
 ```
 
