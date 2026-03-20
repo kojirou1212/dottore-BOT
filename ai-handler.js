@@ -1,10 +1,10 @@
 // ai-handler.js
-const { GoogleGenAI } = require("@google/genai");
+const Anthropic = require("@anthropic-ai/sdk");
 
 class AIHandler {
   constructor(config) {
     this.config = config;
-    this.client = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+    this.client = new Anthropic({ apiKey: config.anthropic.apiKey });
     this.conversationHistory = new Map();
   }
 
@@ -22,33 +22,23 @@ class AIHandler {
   async generateResponse(userId, userMessage) {
     const history = this.getHistory(userId);
 
-    // Gemini形式: role は "user" / "model"
-    history.push({ role: "user", parts: [{ text: userMessage }] });
+    history.push({ role: "user", content: userMessage });
 
-    const maxLen = this.config.gemini.maxHistoryLength;
+    const maxLen = this.config.anthropic.maxHistoryLength;
     while (history.length > maxLen) {
       history.shift();
     }
 
     try {
-      // 最後のユーザーメッセージを除いた部分をhistoryとして渡す
-      const chatHistory = history.slice(0, -1);
-
-      const chat = this.client.chats.create({
-        model: this.config.gemini.model,
-        config: {
-          systemInstruction: this.config.ai.systemPrompt,
-          maxOutputTokens: this.config.gemini.maxTokens,
-        },
-        history: chatHistory,
+      const response = await this.client.messages.create({
+        model: this.config.anthropic.model,
+        max_tokens: this.config.anthropic.maxTokens,
+        system: this.config.ai.systemPrompt,
+        messages: history,
       });
 
-      const response = await chat.sendMessage({
-        message: userMessage,
-      });
-
-      const assistantMessage = response.text;
-      history.push({ role: "model", parts: [{ text: assistantMessage }] });
+      const assistantMessage = response.content[0].text;
+      history.push({ role: "assistant", content: assistantMessage });
       return assistantMessage;
 
     } catch (error) {

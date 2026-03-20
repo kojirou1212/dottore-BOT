@@ -6,23 +6,47 @@ const fs = require("fs");
 const path = require("path");
 const AIHandler = require("./ai-handler");
 
-// ─── 設定ファイルの読み込み ────────────────────────────────────────────────
-const configPath = path.join(__dirname, "config.json");
+// ─── 設定の読み込み（Railway 環境変数 or config.json）────────────────────────
+let config;
 
-if (!fs.existsSync(configPath)) {
-  console.error("[Bot] config.json が見つかりません。");
-  process.exit(1);
+if (process.env.DISCORD_TOKEN) {
+  // Railway（環境変数）モード
+  config = {
+    discord: {
+      token: process.env.DISCORD_TOKEN,
+      targetChannelIds: process.env.TARGET_CHANNEL_IDS
+        ? process.env.TARGET_CHANNEL_IDS.split(",").map((s) => s.trim())
+        : [],
+    },
+    anthropic: {
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      model: process.env.ANTHROPIC_MODEL || "claude-opus-4-5",
+      maxTokens: parseInt(process.env.MAX_TOKENS || "1000", 10),
+      maxHistoryLength: parseInt(process.env.MAX_HISTORY_LENGTH || "20", 10),
+    },
+    ai: {
+      systemPrompt: process.env.SYSTEM_PROMPT || "You are a helpful assistant.",
+      errorMessage: process.env.ERROR_MESSAGE || "エラーが発生しました。しばらくしてからもう一度お試しください。",
+      typingIndicator: process.env.TYPING_INDICATOR !== "false",
+    },
+  };
+} else {
+  // ローカル（config.json）モード
+  const configPath = path.join(__dirname, "config.json");
+  if (!fs.existsSync(configPath)) {
+    console.error("[Bot] config.json が見つかりません。");
+    process.exit(1);
+  }
+  config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 }
-
-const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
 // 必須項目のバリデーション
 if (!config.discord.token || config.discord.token === "YOUR_DISCORD_BOT_TOKEN") {
-  console.error("[Bot] config.json に有効な Discord トークンを設定してください。");
+  console.error("[Bot] 有効な Discord トークンを設定してください。");
   process.exit(1);
 }
-if (!config.gemini.apiKey || config.gemini.apiKey === "YOUR_GEMINI_API_KEY") {
-  console.error("[Bot] config.json に有効な Gemini API キーを設定してください。");
+if (!config.anthropic.apiKey || config.anthropic.apiKey === "YOUR_ANTHROPIC_API_KEY") {
+  console.error("[Bot] 有効な Anthropic API キーを設定してください。");
   process.exit(1);
 }
 
