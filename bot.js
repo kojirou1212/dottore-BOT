@@ -1,16 +1,12 @@
 // bot.js
-// Discord Bot メインエントリーポイント
-
 const { Client, GatewayIntentBits } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const AIHandler = require("./ai-handler");
 
-// ─── 設定の読み込み（Railway 環境変数 or config.json）────────────────────────
 let config;
 
 if (process.env.DISCORD_TOKEN) {
-  // Railway（環境変数）モード
   config = {
     discord: {
       token: process.env.DISCORD_TOKEN,
@@ -18,9 +14,9 @@ if (process.env.DISCORD_TOKEN) {
         ? process.env.TARGET_CHANNEL_IDS.split(",").map((s) => s.trim())
         : [],
     },
-    anthropic: {
-      apiKey: process.env.ANTHROPIC_API_KEY,
-      model: process.env.ANTHROPIC_MODEL || "claude-opus-4-5",
+    gemini: {
+      apiKey: process.env.GEMINI_API_KEY,
+      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
       maxTokens: parseInt(process.env.MAX_TOKENS || "1000", 10),
       maxHistoryLength: parseInt(process.env.MAX_HISTORY_LENGTH || "20", 10),
     },
@@ -31,7 +27,6 @@ if (process.env.DISCORD_TOKEN) {
     },
   };
 } else {
-  // ローカル（config.json）モード
   const configPath = path.join(__dirname, "config.json");
   if (!fs.existsSync(configPath)) {
     console.error("[Bot] config.json が見つかりません。");
@@ -40,17 +35,15 @@ if (process.env.DISCORD_TOKEN) {
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 }
 
-// 必須項目のバリデーション
-if (!config.discord.token || config.discord.token === "YOUR_DISCORD_BOT_TOKEN") {
-  console.error("[Bot] 有効な Discord トークンを設定してください。");
+if (!config.discord.token) {
+  console.error("[Bot] Discordトークンを設定してください。");
   process.exit(1);
 }
-if (!config.anthropic.apiKey || config.anthropic.apiKey === "YOUR_ANTHROPIC_API_KEY") {
-  console.error("[Bot] 有効な Anthropic API キーを設定してください。");
+if (!config.gemini.apiKey) {
+  console.error("[Bot] Gemini APIキーを設定してください。");
   process.exit(1);
 }
 
-// ─── クライアントの初期化 ──────────────────────────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -60,16 +53,11 @@ const client = new Client({
 });
 
 const aiHandler = new AIHandler(config);
-
-// 対象チャンネルIDを Set に変換（高速ルックアップ用）
 const targetChannelIds = new Set(config.discord.targetChannelIds);
 
-// ─── イベントハンドラー ────────────────────────────────────────────────────
-
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
-  console.log(`[Bot] システムプロンプト: "${config.ai.systemPrompt.slice(0, 60)}..."`);
 });
 
 client.on("messageCreate", async (message) => {
@@ -85,7 +73,6 @@ client.on("messageCreate", async (message) => {
   if (content === "!reset") {
     aiHandler.clearHistory(userId);
     await message.reply("会話履歴をリセットしました。新しい会話を始めましょう！");
-    console.log(`[Bot] 履歴リセット: ${userTag}`);
     return;
   }
 
