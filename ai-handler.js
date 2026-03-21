@@ -19,8 +19,31 @@ class AIHandler {
     this.conversationHistory.delete(userId);
   }
 
+  // 履歴が user/model 交互になっているか検証・修復する
+  sanitizeHistory(history) {
+    // 先頭が model なら user が来るまで削除
+    while (history.length > 0 && history[0].role !== "user") {
+      history.shift();
+    }
+    // user/model が交互になっているか確認し、連続している箇所は後ろを削除
+    let i = 0;
+    while (i < history.length - 1) {
+      if (history[i].role === history[i + 1].role) {
+        history.splice(i + 1, 1); // 同じroleが連続していたら後ろを削除
+      } else {
+        i++;
+      }
+    }
+    // 末尾が model で終わっている場合はそのまま（次のuserメッセージを追加するため問題なし）
+  }
+
   async generateResponse(userId, userMessage) {
     const history = this.getHistory(userId);
+
+    // 末尾が user のまま残っていたら（前回エラー時の残骸）削除
+    while (history.length > 0 && history[history.length - 1].role === "user") {
+      history.pop();
+    }
 
     history.push({ role: "user", parts: [{ text: userMessage }] });
 
@@ -28,10 +51,9 @@ class AIHandler {
     while (history.length > maxLen) {
       history.shift();
     }
-    // 先頭が model になっていたら user が来るまで削除
-    while (history.length > 0 && history[0].role !== "user") {
-      history.shift();
-    }
+
+    // API呼び出し前に履歴を必ず整合性チェック・修復
+    this.sanitizeHistory(history);
 
     try {
       // 最後のuserメッセージはsendMessageで送るため、historyからは除く
