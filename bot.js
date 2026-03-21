@@ -66,7 +66,7 @@ const targetChannelIds = new Set(config.discord.targetChannelIds);
 
 // ─── イベントハンドラー ────────────────────────────────────────────────────
 
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
   console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
