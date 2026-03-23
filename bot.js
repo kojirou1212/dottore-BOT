@@ -160,12 +160,60 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
+// ─── 定時メッセージ ────────────────────────────────────────────────────────
+
+// 時刻ごとに使用するセリフリストのマッピング
+const scheduledLists = {
+  9:  okusuriList, // 朝9時  → 薬の投与
+  12: observeList, // 昼12時 → 観察（昼の様子を見る）
+  15: okusuriList, // 午後3時 → 薬の投与
+  21: sleepList,   // 夜21時 → 夜の管理
+  0:  sleepList,   // 深夜0時 → 就寝命令（24時 = hour 0）
+};
+
+// 定時スケジューラー（毎分チェック）
+function startScheduler() {
+  // 最後に送信した時刻を記録し、同じ時刻に2回送らないようにする
+  let lastSentHour = -1;
+
+  setInterval(async () => {
+    const now = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })
+    );
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+
+    // 対象時刻の0分台かつ未送信のとき
+    if (minute !== 0) return;
+    if (!(hour in scheduledLists)) return;
+    if (lastSentHour === hour) return;
+
+    lastSentHour = hour;
+    console.log(`[Scheduler] 定時メッセージ送信 hour=${hour}`);
+
+    const text = pick(scheduledLists[hour]);
+
+    // 全監視チャンネルに送信
+    for (const channelId of targetChannelIds) {
+      try {
+        const channel = await client.channels.fetch(channelId);
+        if (!channel || !channel.isTextBased()) continue;
+        await channel.send(text);
+      } catch (chErr) {
+        console.error(`[Scheduler] チャンネル ${channelId} への送信失敗:`, chErr.message);
+      }
+    }
+  }, 60 * 1000); // 毎分チェック
+}
+
 // ─── イベントハンドラー ────────────────────────────────────────────────────
 
 client.once("clientReady", () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
   console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
+  startScheduler();
+  console.log("[Bot] 定時スケジューラー起動（9/12/15/21/24時）");
 });
 
 client.on("messageCreate", async (message) => {
