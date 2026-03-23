@@ -19,8 +19,21 @@ class AIHandler {
     this.conversationHistory.delete(userId);
   }
 
-  // 履歴が user/model 交互になっているか検証・修復する
+  // 履歴が user/model 交互・各エントリが有効かを検証・修復する
   sanitizeHistory(history) {
+    // parts が空または text が空文字のエントリを除去
+    for (let i = history.length - 1; i >= 0; i--) {
+      const entry = history[i];
+      if (
+        !entry.parts ||
+        !Array.isArray(entry.parts) ||
+        entry.parts.length === 0 ||
+        !entry.parts[0].text ||
+        entry.parts[0].text.trim() === ""
+      ) {
+        history.splice(i, 1);
+      }
+    }
     // 先頭が model なら user が来るまで削除
     while (history.length > 0 && history[0].role !== "user") {
       history.shift();
@@ -29,12 +42,11 @@ class AIHandler {
     let i = 0;
     while (i < history.length - 1) {
       if (history[i].role === history[i + 1].role) {
-        history.splice(i + 1, 1); // 同じroleが連続していたら後ろを削除
+        history.splice(i + 1, 1);
       } else {
         i++;
       }
     }
-    // 末尾が model で終わっている場合はそのまま（次のuserメッセージを追加するため問題なし）
   }
 
   async generateResponse(userId, userMessage) {
@@ -56,7 +68,7 @@ class AIHandler {
     this.sanitizeHistory(history);
 
     try {
-      // 最後のuserメッセージはsendMessageで送るため、historyからは除く
+      // 最後のuserメッセージはsendMessageで送るため historyからは除く
       const chatHistory = history.slice(0, -1);
 
       const chat = this.ai.chats.create({
@@ -70,7 +82,15 @@ class AIHandler {
 
       const response = await chat.sendMessage({ message: userMessage });
 
-      const assistantMessage = response.text;
+      // response.text は関数なので呼び出す
+      const assistantMessage = typeof response.text === "function"
+        ? response.text()
+        : response.text;
+
+      if (!assistantMessage || assistantMessage.trim() === "") {
+        throw new Error("AIからの応答が空でした。");
+      }
+
       history.push({ role: "model", parts: [{ text: assistantMessage }] });
       return assistantMessage;
 
@@ -79,7 +99,7 @@ class AIHandler {
       if (history.length > 0 && history[history.length - 1].role === "user") {
         history.pop();
       }
-      console.error(`[AIHandler] API error for user ${userId}:`, error.message);
+      console.error(`[AIHandler] API error for user ${userId}:`, JSON.stringify(error.message));
       throw error;
     }
   }
