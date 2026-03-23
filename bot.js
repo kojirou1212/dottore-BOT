@@ -5,6 +5,7 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const AIHandler = require("./ai-handler");
+const { VCHandler } = require("./vc-handler");
 
 // ─── 設定の読み込み（環境変数優先、なければ config.json）─────────────────
 let config;
@@ -16,6 +17,7 @@ if (process.env.DISCORD_TOKEN) {
       targetChannelIds: process.env.TARGET_CHANNEL_IDS
         ? process.env.TARGET_CHANNEL_IDS.split(",").map((s) => s.trim())
         : [],
+      voiceChannelId: process.env.VOICE_CHANNEL_ID || "",
     },
     gemini: {
       apiKey: process.env.GEMINI_API_KEY,
@@ -53,10 +55,12 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates, // VC機能に必要
   ],
 });
 
 const aiHandler = new AIHandler(config);
+const vcHandler = new VCHandler(config);
 const targetChannelIds = new Set(config.discord.targetChannelIds);
 
 // ─── セリフリスト ──────────────────────────────────────────────────────────
@@ -162,18 +166,15 @@ function splitMessage(text, maxLength) {
 
 // ─── 定時メッセージ ────────────────────────────────────────────────────────
 
-// 時刻ごとに使用するセリフリストのマッピング
 const scheduledLists = {
-  9:  okusuriList, // 朝9時  → 薬の投与
-  12: observeList, // 昼12時 → 観察（昼の様子を見る）
-  15: okusuriList, // 午後3時 → 薬の投与
-  21: sleepList,   // 夜21時 → 夜の管理
-  0:  sleepList,   // 深夜0時 → 就寝命令（24時 = hour 0）
+  9:  okusuriList,
+  12: observeList,
+  15: okusuriList,
+  21: sleepList,
+  0:  sleepList,
 };
 
-// 定時スケジューラー（毎分チェック）
 function startScheduler() {
-  // 最後に送信した時刻を記録し、同じ時刻に2回送らないようにする
   let lastSentHour = -1;
 
   setInterval(async () => {
@@ -183,7 +184,6 @@ function startScheduler() {
     const hour = now.getHours();
     const minute = now.getMinutes();
 
-    // 対象時刻の0分台かつ未送信のとき
     if (minute !== 0) return;
     if (!(hour in scheduledLists)) return;
     if (lastSentHour === hour) return;
@@ -193,7 +193,6 @@ function startScheduler() {
 
     const text = pick(scheduledLists[hour]);
 
-    // 全監視チャンネルに送信
     for (const channelId of targetChannelIds) {
       try {
         const channel = await client.channels.fetch(channelId);
@@ -203,7 +202,7 @@ function startScheduler() {
         console.error(`[Scheduler] チャンネル ${channelId} への送信失敗:`, chErr.message);
       }
     }
-  }, 60 * 1000); // 毎分チェック
+  }, 60 * 1000);
 }
 
 // ─── イベントハンドラー ────────────────────────────────────────────────────
@@ -226,8 +225,114 @@ client.on("messageCreate", async (message) => {
 
   if (!content) return;
 
+  // ─── !kanshi コマンド（VC参加）─────────────────────────────
+  // 使い方:
+  //   !kanshi            → コマンド実行者が入っているVCに参加
+  //   !kanshi チャンネル名  → 名前で検索して参加
+  //   !kanshi チャンネルID  → IDで直接指定して参加
+  if (content === "!kanshi" || content.startsWith("!kanshi ")) {
+    if (vcHandler.isConnected()) {
+      await message.reply("……既にVCに入っている。二重に参加する必要はない。");
+      return;
+    }
+
+    const arg = content.slice("!kanshi".length).trim(); // チャンネル名 or ID（空なら実行者のVC）
+    let targetVC = null;
+
+    if (arg) {
+      // 引数あり：サーバー内のVCチャンネルを名前またはIDで検索
+      const voiceChannels = message.guild.channels.cache.filter(
+        (ch) => ch.isVoiceBased()
+      );
+      targetVC =
+        voiceChannels.get(arg) ??                                        // ID完全一致
+        voiceChannels.find((ch) => ch.name === arg) ??                   // 名前完全一致
+        voiceChannels.find((ch) =>                                       // 名前部分一致
+          ch.name.toLowerCase().includes(arg.toLowerCase())
+        ) ??
+        null;
+
+      if (!targetVC) {
+        // VCチャンネル一覧を返して教える
+        const vcList = voiceChannels.map((ch) => `・${ch.name} (${ch.id})`).join("\n");
+        await message.reply(
+          `……「${arg}」というVCが見つからない。\n以下から正確に指定しろ。\n${vcList}`
+        );
+        return;
+      }
+    } else {
+      // 引数なし：コマンド実行者がいるVCに参加
+      const member =
+        message.guild.members.cache.get(userId) ??
+        await message.guild.members.fetch(userId).catch(() => null);
+      targetVC = member?.voice?.channel ?? null;
+
+      if (!targetVC) {
+        const voiceChannels = message.guild.channels.cache.filter((ch) => ch.isVoiceBased());
+        const vcList = voiceChannels.map((ch) => `・${ch.name}`).join("\n");
+        await message.reply(
+          "……VCに入っていないな。\n`!kanshi [チャンネル名]` で指定するか、VCに入ってから実行しろ。\n\n" +
+          `利用可能なVC：\n${vcList}`
+        );
+        return;
+      }
+    }
+
+    await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。`);
+    const joined = await vcHandler.join(targetVC);
+
+    if (joined) {
+      await message.reply("`!hakase [メッセージ]` で私に声を出させろ。終わるなら `!owari` だ。");
+      console.log(`[Bot] VC参加完了 [${userTag}] → ${targetVC.name}`);
+    } else {
+      await message.reply("……VC参加に失敗した。権限を確認しろ。");
+    }
+    return;
+  }
+
+  // ─── !hakase コマンド（VCへの音声応答）──────────────────────
+  if (content.startsWith("!hakase ") || content === "!hakase") {
+    const userText = content.slice("!hakase".length).trim();
+
+    if (!vcHandler.isConnected()) {
+      await message.reply("……VCに入っていない。まず `!kanshi` を実行しろ。");
+      return;
+    }
+    if (!userText) {
+      await message.reply("……何か言え。 `!hakase [メッセージ]` の形式で使え。");
+      return;
+    }
+
+    console.log(`[Bot] !hakase受信 [${userTag}]: ${userText.slice(0, 80)}`);
+
+    // タイピングインジケーター
+    if (config.ai.typingIndicator) {
+      await message.channel.sendTyping();
+    }
+
+    const sound = await vcHandler.respondToMessage(userText);
+    if (sound) {
+      await message.reply(`……${sound.name}。`);
+    } else {
+      await message.reply("……もう音は残っていない。全て使い切った。");
+    }
+    return;
+  }
+
   // ─── コマンド処理 ────────────────────────────────────────────
   switch (content) {
+    // VC退出
+    case "!owari": {
+      if (!vcHandler.isConnected()) {
+        await message.reply("……VCには入っていない。");
+        return;
+      }
+      vcHandler.leave();
+      await message.reply("……退出する。観察記録は保存した。");
+      console.log(`[Bot] VC退出 [${userTag}]`);
+      return;
+    }
+
     case "!reset":
       aiHandler.clearHistory(userId);
       await message.reply("気が変わった。記憶操作の薬だ、飲め。今すぐ");
@@ -267,14 +372,17 @@ client.on("messageCreate", async (message) => {
     case "!help":
       await message.reply(
         "【コマンド一覧】\n" +
-        "!reset   … 会話履歴をリセット\n" +
-        "!okusuri … 薬を投与してもらう\n" +
-        "!sleep   … 就寝前、管理下で休む\n" +
-        "!pain    … 痛み・不調を報告する\n" +
-        "!work    … 作業・勉強を開始する\n" +
-        "!observe … 観察してほしいとき\n" +
-        "!reward  … 成功・達成を報告する\n" +
-        "!help    … このヘルプを表示\n\n" +
+        "!reset         … 会話履歴をリセット\n" +
+        "!okusuri       … 薬を投与してもらう\n" +
+        "!sleep         … 就寝前、管理下で休む\n" +
+        "!pain          … 痛み・不調を報告する\n" +
+        "!work          … 作業・勉強を開始する\n" +
+        "!observe       … 観察してほしいとき\n" +
+        "!reward        … 成功・達成を報告する\n" +
+        "!kanshi [VC名] … ドットーレをVCに召喚（引数なしで自分のVCに参加）\n" +
+        "!hakase [msg]  … VCでドットーレに反応させる（AI選択で音声再生）\n" +
+        "!owari         … ドットーレをVCから退出させる\n" +
+        "!help          … このヘルプを表示\n\n" +
         "それ以外のメッセージはドットーレが回答します。"
       );
       return;

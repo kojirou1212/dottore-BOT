@@ -7,8 +7,11 @@ Gemini AIを使った対話型Discordボットです。
 ```
 ├── bot.js          # メインエントリーポイント
 ├── ai-handler.js   # Gemini API 通信・会話履歴管理
+├── vc-handler.js   # VC接続・音声再生・AI音声選択
 ├── config.json     # 設定ファイル（トークン・プロンプト等）
-└── package.json    # 依存パッケージ定義
+├── package.json    # 依存パッケージ定義
+└── sounds/         # 音声ファイル置き場（mp3/ogg）
+    └── README.md   # 配置するファイル一覧
 ```
 
 ## セットアップ
@@ -26,7 +29,8 @@ npm install
 {
   "discord": {
     "token": "YOUR_DISCORD_BOT_TOKEN",
-    "targetChannelIds": ["YOUR_CHANNEL_ID"]
+    "targetChannelIds": ["YOUR_CHANNEL_ID"],
+    "voiceChannelId": "YOUR_VOICE_CHANNEL_ID"
   },
   "gemini": {
     "apiKey": "YOUR_GEMINI_API_KEY",
@@ -56,10 +60,15 @@ npm install
 
 ### 3. Discord Bot の権限設定
 Discord Developer Portal で以下を有効化してください。
-- **Bot Permissions**: Send Messages, Read Message History
+- **Bot Permissions**: Send Messages, Read Message History, **Connect, Speak**（VC機能に必要）
 - **Privileged Gateway Intents**: Message Content Intent
 
-### 4. 起動
+### 4. 音声ファイルの配置
+
+`sounds/` ディレクトリに音声ファイルを配置してください。  
+詳細は `sounds/README.md` を参照。
+
+### 5. 起動
 ```bash
 npm start
 ```
@@ -69,28 +78,44 @@ npm start
 | コマンド | 説明 |
 |----------|------|
 | `!reset` | 自分の会話履歴をリセット |
+| `!okusuri` | 薬を投与してもらう |
+| `!sleep` | 就寝前、管理下で休む |
+| `!pain` | 痛み・不調を報告する |
+| `!work` | 作業・勉強を開始する |
+| `!observe` | 観察してほしいとき |
+| `!reward` | 成功・達成を報告する |
+| `!kanshi [VC名]` | ドットーレをVCに召喚（引数なしで自分のVCに参加） |
+| `!hakase [メッセージ]` | VCでドットーレに反応させる（AI選択で音声再生） |
+| `!owari` | ドットーレをVCから退出させる |
 | `!help` | ヘルプを表示 |
 | （その他） | AIが対話形式で回答 |
 
-## カスタマイズ例
+## VC機能の使い方
 
-### システムプロンプトの変更（config.json）
-```json
-"ai": {
-  "systemPrompt": "あなたはゲームサーバーのサポート担当です。ゲームのルールや操作方法を丁寧に教えてください。"
-}
+```
+1. !kanshi          → botが自分のいるVCに参加
+   !kanshi 雑談      → 「雑談」という名前のVCに参加（部分一致OK）
+   !kanshi 123456789 → チャンネルIDで直接指定して参加
+2. !hakase 溜息ついて  → AIが最適な音声（溜息.mp3）を選んで再生
+3. !hakase 笑って      → 笑い声系の音声を再生
+4. !owari           → botがVCから退出
 ```
 
-### モデルの変更
-```json
-"gemini": {
-  "model": "gemini-2.5-pro"
-}
-```
+- 1セッション中に同じ音声は使用されません（重複なし）
+- 全音声を使い切るとメッセージで通知されます
+- `!owari` でセッションをリセットすれば再度使用可能
 
-### 監視チャンネルの追加
-```json
-"discord": {
-  "targetChannelIds": ["123456789", "987654321"]
-}
-```
+## 環境変数（Railway等）
+
+| 変数名 | 説明 |
+|--------|------|
+| `DISCORD_TOKEN` | Discord Bot トークン |
+| `TARGET_CHANNEL_IDS` | 監視チャンネルID（カンマ区切り） |
+| `VOICE_CHANNEL_ID` | 参加するVCのチャンネルID |
+| `GEMINI_API_KEY` | Gemini API キー |
+| `GEMINI_MODEL` | モデル名（デフォルト: gemini-2.5-flash） |
+| `MAX_TOKENS` | 最大トークン数（デフォルト: 1000） |
+| `MAX_HISTORY_LENGTH` | 会話履歴最大件数（デフォルト: 20） |
+| `SYSTEM_PROMPT` | システムプロンプト |
+| `ERROR_MESSAGE` | エラーメッセージ |
+| `TYPING_INDICATOR` | タイピング表示（true/false） |
