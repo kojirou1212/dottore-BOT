@@ -67,6 +67,10 @@ class AIHandler {
     // API呼び出し前に履歴を必ず整合性チェック・修復
     this.sanitizeHistory(history);
 
+    // 現在の日時（日本時間）をシステムプロンプトに注入
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    const systemPromptWithTime = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}`;
+
     try {
       // 最後のuserメッセージはsendMessageで送るため historyからは除く
       const chatHistory = history.slice(0, -1);
@@ -74,7 +78,7 @@ class AIHandler {
       const chat = this.ai.chats.create({
         model: this.config.gemini.model,
         config: {
-          systemInstruction: this.config.ai.systemPrompt,
+          systemInstruction: systemPromptWithTime,
           maxOutputTokens: this.config.gemini.maxTokens,
         },
         history: chatHistory,
