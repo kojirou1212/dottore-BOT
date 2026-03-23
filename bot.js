@@ -26,7 +26,7 @@ if (process.env.DISCORD_TOKEN) {
     },
     ai: {
       systemPrompt: process.env.SYSTEM_PROMPT || "You are a helpful assistant.",
-      errorMessage: process.env.ERROR_MESSAGE || "エラーが発生しました。しばらくしてからもう一度お試しください。",
+      errorMessage: process.env.ERROR_MESSAGE || "(頭を抱え)",
       typingIndicator: process.env.TYPING_INDICATOR !== "false",
     },
   };
@@ -84,7 +84,7 @@ client.on("messageCreate", async (message) => {
 
   if (content === "!reset") {
     aiHandler.clearHistory(userId);
-    await message.reply("会話履歴をリセットしました。新しい会話を始めましょう！");
+    await message.reply("気が変わった。記憶操作の薬だ、飲め。今すぐ");
     console.log(`[Bot] 履歴リセット: ${userTag}`);
     return;
   }
@@ -94,7 +94,7 @@ client.on("messageCreate", async (message) => {
       "【コマンド一覧】\n" +
       "!reset … 会話履歴をリセットします\n" +
       "!help  … このヘルプを表示します\n\n" +
-      "それ以外のメッセージはAIが回答します。"
+      "それ以外のメッセージはドットーレが回答します。"
     );
     return;
   }
