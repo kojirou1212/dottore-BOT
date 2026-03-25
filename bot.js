@@ -231,8 +231,12 @@ client.on("messageCreate", async (message) => {
   //   !kanshi チャンネル名  → 名前で検索して参加
   //   !kanshi チャンネルID  → IDで直接指定して参加
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
+    if (!vcHandler.vcAvailable) {
+      await message.reply("……VC機能は現在無効だ。`npm install @discordjs/voice ffmpeg-static opusscript` を実行してから再起動しろ。");
+      return;
+    }
     if (vcHandler.isConnected()) {
-      await message.reply("……既にVCに入っている。二重に参加する必要はない。");
+      await message.reply("……既にVCに入っている。二度も同じことをするな。");
       return;
     }
 
@@ -256,7 +260,7 @@ client.on("messageCreate", async (message) => {
         // VCチャンネル一覧を返して教える
         const vcList = voiceChannels.map((ch) => `・${ch.name} (${ch.id})`).join("\n");
         await message.reply(
-          `……「${arg}」というVCが見つからない。\n以下から正確に指定しろ。\n${vcList}`
+          `……「${arg}」というVCが見つからない……ふん、\n以下から正確に指定しろ。\n${vcList}`
         );
         return;
       }
@@ -271,21 +275,21 @@ client.on("messageCreate", async (message) => {
         const voiceChannels = message.guild.channels.cache.filter((ch) => ch.isVoiceBased());
         const vcList = voiceChannels.map((ch) => `・${ch.name}`).join("\n");
         await message.reply(
-          "……VCに入っていないな。\n`!kanshi [チャンネル名]` で指定するか、VCに入ってから実行しろ。\n\n" +
+          "被検体……VCに入っていないな。\n`!kanshi [チャンネル名]` で指定するか、VCに入ってから実行しろ。\n\n" +
           `利用可能なVC：\n${vcList}`
         );
         return;
       }
     }
 
-    await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。`);
+    await message.reply(`あぁ……参加する。「${targetVC.name}」の監視を開始する。`);
     const joined = await vcHandler.join(targetVC);
 
     if (joined) {
-      await message.reply("`!hakase [メッセージ]` で私に声を出させろ。終わるなら `!owari` だ。");
+      await message.reply("`!hakase [メッセージ]` で聞け。用がないなら `!owari` だ。");
       console.log(`[Bot] VC参加完了 [${userTag}] → ${targetVC.name}`);
     } else {
-      await message.reply("……VC参加に失敗した。権限を確認しろ。");
+      await message.reply("……権限不足。直せ。");
     }
     return;
   }
@@ -295,11 +299,11 @@ client.on("messageCreate", async (message) => {
     const userText = content.slice("!hakase".length).trim();
 
     if (!vcHandler.isConnected()) {
-      await message.reply("……VCに入っていない。まず `!kanshi` を実行しろ。");
+      await message.reply("……なにも聞こえん。 `!kanshi` を実行しろ。");
       return;
     }
     if (!userText) {
-      await message.reply("……何か言え。 `!hakase [メッセージ]` の形式で使え。");
+      await message.reply("……何か言え。 `!hakase [メッセージ]` だ。");
       return;
     }
 
@@ -314,7 +318,7 @@ client.on("messageCreate", async (message) => {
     if (sound) {
       await message.reply(`……${sound.name}。`);
     } else {
-      await message.reply("……もう音は残っていない。全て使い切った。");
+      await message.reply("……どうだ。");
     }
     return;
   }
@@ -328,7 +332,7 @@ client.on("messageCreate", async (message) => {
         return;
       }
       vcHandler.leave();
-      await message.reply("……退出する。観察記録は保存した。");
+      await message.reply("よかろう……退出する。観察記録は保存した。");
       console.log(`[Bot] VC退出 [${userTag}]`);
       return;
     }

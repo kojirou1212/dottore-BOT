@@ -1,17 +1,21 @@
 // vc-handler.js
 // ボイスチャンネル接続・音声再生・AI音声選択ロジック
 
-const {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-  VoiceConnectionStatus,
-  entersState,
-} = require("@discordjs/voice");
 const { GoogleGenAI } = require("@google/genai");
 const path = require("path");
 const fs = require("fs");
+
+// ── @discordjs/voice の遅延ロード ─────────────────────────────────────────
+// パッケージが未インストールでも bot 起動時にクラッシュしないよう
+// require を関数内で行い、失敗した場合は VC 機能全体を無効化する
+let voiceLib = null;
+try {
+  voiceLib = require("@discordjs/voice");
+  console.log("[VCHandler] @discordjs/voice ロード成功");
+} catch {
+  console.warn("[VCHandler] @discordjs/voice が見つかりません。VC機能は無効です。");
+  console.warn("[VCHandler] 有効にするには: npm install @discordjs/voice ffmpeg-static opusscript");
+}
 
 // ── サウンドボード定義 ────────────────────────────────────────────────────
 // 2枚目の画像のサウンドボード一覧に対応するファイル名を定義
@@ -40,23 +44,30 @@ class VCHandler {
   constructor(config) {
     this.config = config;
     this.connection = null;
-    this.player = createAudioPlayer();
+    this.player = null;
     this.isPlaying = false;
-    this.usedSounds = new Set(); // 1セッション中に使用済みの音声
+    this.usedSounds = new Set();
     this.ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+    this.vcAvailable = voiceLib !== null;
 
-    this.player.on(AudioPlayerStatus.Idle, () => {
-      this.isPlaying = false;
-    });
-
-    this.player.on("error", (err) => {
-      console.error("[VCHandler] AudioPlayer error:", err.message);
-      this.isPlaying = false;
-    });
+    if (this.vcAvailable) {
+      const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
+      this.player = createAudioPlayer();
+      this.player.on(AudioPlayerStatus.Idle, () => { this.isPlaying = false; });
+      this.player.on("error", (err) => {
+        console.error("[VCHandler] AudioPlayer error:", err.message);
+        this.isPlaying = false;
+      });
+    }
   }
 
   // ── VC への参加 ─────────────────────────────────────────────────────────
   async join(voiceChannel) {
+    if (!this.vcAvailable) {
+      console.warn("[VCHandler] VC機能無効のため参加スキップ");
+      return false;
+    }
+    const { joinVoiceChannel, VoiceConnectionStatus, entersState } = voiceLib;
     try {
       this.connection = joinVoiceChannel({
         channelId: voiceChannel.id,
@@ -68,7 +79,7 @@ class VCHandler {
 
       await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
       this.connection.subscribe(this.player);
-      this.usedSounds.clear(); // セッション開始時にリセット
+      this.usedSounds.clear();
       console.log(`[VCHandler] VC参加完了: ${voiceChannel.name}`);
       return true;
     } catch (err) {
@@ -93,10 +104,9 @@ class VCHandler {
   }
 
   isConnected() {
-    return (
-      this.connection !== null &&
-      this.connection.state.status !== VoiceConnectionStatus.Destroyed
-    );
+    if (!this.vcAvailable || !this.connection) return false;
+    const { VoiceConnectionStatus } = voiceLib;
+    return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
   }
 
   // ── AIによる音声選択 ─────────────────────────────────────────────────────
@@ -158,6 +168,10 @@ ${soundList}
 
   // ── 音声ファイルの再生 ────────────────────────────────────────────────────
   async playSound(soundEntry) {
+    if (!this.vcAvailable) {
+      console.warn("[VCHandler] VC機能無効のため再生スキップ");
+      return false;
+    }
     if (!this.isConnected()) {
       console.warn("[VCHandler] VC未接続のため再生スキップ");
       return false;
@@ -167,11 +181,12 @@ ${soundList}
     const filePath = path.join(soundsDir, soundEntry.file);
 
     if (!fs.existsSync(filePath)) {
-      console.warn(`[VCHandler] 音声ファイルが見つかりません: ${filePath}`);
+      console.warn(`[VCHandler] 音声ファイルが見つかりません（スキップ）: ${soundEntry.file}`);
       return false;
     }
 
     try {
+      const { createAudioResource } = voiceLib;
       const resource = createAudioResource(filePath);
       this.player.play(resource);
       this.isPlaying = true;
