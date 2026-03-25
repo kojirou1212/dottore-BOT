@@ -49,6 +49,32 @@ class AIHandler {
     }
   }
 
+  // 503など一時的エラー用リトライ付きAPI呼び出し
+  async _callWithRetry(fn, maxRetries = 3) {
+    let lastError;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastError = err;
+        const msg = err.message || "";
+        const isRetryable =
+          msg.includes("503") ||
+          msg.includes("UNAVAILABLE") ||
+          msg.includes("high demand") ||
+          msg.includes("429") ||
+          msg.includes("Resource has been exhausted");
+
+        if (!isRetryable || attempt === maxRetries) break;
+
+        const waitMs = (2 ** attempt) * 1000 + Math.random() * 500; // 1s, 2s, 4s + jitter
+        console.warn(`[AIHandler] リトライ ${attempt + 1}/${maxRetries} (${Math.round(waitMs)}ms後): ${msg.slice(0, 80)}`);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+    }
+    throw lastError;
+  }
+
   async generateResponse(userId, userMessage) {
     const history = this.getHistory(userId);
 
@@ -75,25 +101,29 @@ class AIHandler {
       // 最後のuserメッセージはsendMessageで送るため historyからは除く
       const chatHistory = history.slice(0, -1);
 
-      const chat = this.ai.chats.create({
-        model: this.config.gemini.model,
-        config: {
-          systemInstruction: systemPromptWithTime,
-          maxOutputTokens: this.config.gemini.maxTokens,
-        },
-        history: chatHistory,
+      const assistantMessage = await this._callWithRetry(async () => {
+        const chat = this.ai.chats.create({
+          model: this.config.gemini.model,
+          config: {
+            systemInstruction: systemPromptWithTime,
+            maxOutputTokens: this.config.gemini.maxTokens,
+          },
+          history: chatHistory,
+        });
+
+        const response = await chat.sendMessage({ message: userMessage });
+
+        // response.text は関数なので呼び出す
+        const text = typeof response.text === "function"
+          ? response.text()
+          : response.text;
+
+        if (!text || text.trim() === "") {
+          throw new Error("AIからの応答が空でした。");
+        }
+
+        return text;
       });
-
-      const response = await chat.sendMessage({ message: userMessage });
-
-      // response.text は関数なので呼び出す
-      const assistantMessage = typeof response.text === "function"
-        ? response.text()
-        : response.text;
-
-      if (!assistantMessage || assistantMessage.trim() === "") {
-        throw new Error("AIからの応答が空でした。");
-      }
 
       history.push({ role: "model", parts: [{ text: assistantMessage }] });
       return assistantMessage;
