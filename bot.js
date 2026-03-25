@@ -278,13 +278,16 @@ client.on("messageCreate", async (message) => {
       }
     }
 
+    if (!vcHandler.vcAvailable) {
+      await message.reply("……VC参加には `@discordjs/voice` が必要だ。`npm install @discordjs/voice ffmpeg-static opusscript` を実行してから再起動しろ。");
+      return;
+    }
+
     const joined = await vcHandler.join(targetVC);
 
     if (joined) {
       await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。\n\`!hakase [メッセージ]\` で私に声を出させろ。終わるなら \`!owari\` だ。`);
       console.log(`[Bot] VC参加完了 [${userTag}] → ${targetVC.name}`);
-    } else if (!vcHandler.vcAvailable) {
-      await message.reply("……VC参加には `@discordjs/voice` が必要だ。`npm install @discordjs/voice ffmpeg-static opusscript` を実行してから再起動しろ。");
     } else {
       await message.reply("……VC参加に失敗した。権限を確認しろ。");
     }
