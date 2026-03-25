@@ -48,7 +48,8 @@ class VCHandler {
     this.isPlaying = false;
     this.usedSounds = new Set();
     this.ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    this.vcAvailable = voiceLib !== null;
+    this.vcAvailable = voiceLib !== null; // VC参加・退出が可能か
+    this.playAvailable = false;           // 音声再生が可能か（ファイルが揃ってから true になる）
 
     if (this.vcAvailable) {
       const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
@@ -64,7 +65,7 @@ class VCHandler {
   // ── VC への参加 ─────────────────────────────────────────────────────────
   async join(voiceChannel) {
     if (!this.vcAvailable) {
-      console.warn("[VCHandler] VC機能無効のため参加スキップ");
+      console.warn("[VCHandler] @discordjs/voice 未インストールのため参加不可");
       return false;
     }
     const { joinVoiceChannel, VoiceConnectionStatus, entersState } = voiceLib;
@@ -78,7 +79,7 @@ class VCHandler {
       });
 
       await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
-      this.connection.subscribe(this.player);
+      if (this.player) this.connection.subscribe(this.player);
       this.usedSounds.clear();
       console.log(`[VCHandler] VC参加完了: ${voiceChannel.name}`);
       return true;
@@ -168,8 +169,8 @@ ${soundList}
 
   // ── 音声ファイルの再生 ────────────────────────────────────────────────────
   async playSound(soundEntry) {
-    if (!this.vcAvailable) {
-      console.warn("[VCHandler] VC機能無効のため再生スキップ");
+    if (!this.vcAvailable || !this.player) {
+      console.warn("[VCHandler] 音声再生不可（@discordjs/voice 未インストール）");
       return false;
     }
     if (!this.isConnected()) {
