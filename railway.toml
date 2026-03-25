@@ -1,5 +1,6 @@
 [build]
 builder = "nixpacks"
+installCommand = "npm install"
 
 [deploy]
 startCommand = "node bot.js"
