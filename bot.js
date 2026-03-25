@@ -49,13 +49,65 @@ if (!config.gemini.apiKey) {
   process.exit(1);
 }
 
+// ─── メッセージリストの読み込み ───────────────────────────────────────────
+const MESSAGES_PATH = path.join(__dirname, "messages.json");
+
+let messageLists = {};   // { okusuri: [...], sleep: [...], ... }
+let scheduleMap = {};    // { 9: "okusuri", 21: "sleep", ... }
+
+function loadMessages() {
+  try {
+    const raw = fs.readFileSync(MESSAGES_PATH, "utf-8");
+    const data = JSON.parse(raw);
+
+    // スケジュール設定をパース（キーを数値に変換）
+    const newSchedule = {};
+    for (const [hourStr, listName] of Object.entries(data.schedule || {})) {
+      if (hourStr.startsWith("_")) continue;
+      const hour = parseInt(hourStr, 10);
+      if (!isNaN(hour) && typeof listName === "string") {
+        newSchedule[hour] = listName;
+      }
+    }
+
+    // リストをパース（予約キーを除外）
+    const newLists = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (key === "schedule" || key.startsWith("_")) continue;
+      if (Array.isArray(val) && val.length > 0) {
+        newLists[key] = val;
+      }
+    }
+
+    scheduleMap = newSchedule;
+    messageLists = newLists;
+
+    const listSummary = Object.entries(newLists)
+      .map(([k, v]) => `${k}(${v.length}件)`)
+      .join(", ");
+    console.log(`[Messages] 読み込み完了 → ${listSummary}`);
+    console.log(`[Messages] スケジュール → ${JSON.stringify(newSchedule)}`);
+    return true;
+  } catch (err) {
+    console.error("[Messages] 読み込み失敗:", err.message);
+    return false;
+  }
+}
+
+// 起動時に読み込み
+if (!fs.existsSync(MESSAGES_PATH)) {
+  console.error(`[Messages] ${MESSAGES_PATH} が見つかりません。messages.json を作成してください。`);
+  process.exit(1);
+}
+loadMessages();
+
 // ─── クライアントの初期化 ──────────────────────────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates, // VC機能に必要
+    GatewayIntentBits.GuildVoiceStates,
   ],
 });
 
@@ -63,94 +115,11 @@ const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
 const targetChannelIds = new Set(config.discord.targetChannelIds);
 
-// ─── セリフリスト ──────────────────────────────────────────────────────────
-
-const okusuriList = [
-    "口を開けろ。……ああ、その反応だ。予測通りだな。いい、飲み込め。",
-    "投与する。……逃げるな。いい個体差だ。記録する価値がある。飲め。",
-    "飲み込め。……副作用？ああ、気にするな。観察対象としてはむしろ都合がいい。",
-    "嚥下しろ。……遅いな。処理効率が落ちる。私の指示に従え。飲め。",
-    "新しい調合だ。……ああ、その躊躇、実に興味深い。いい、飲み込め。",
-    "躊躇するな。……その迷いも含めて観察対象だ。無駄にするな。口を開けろ。",
-    "摂取しろ。……その反応、いいな。予測から少し外れている。……ああ、続けろ。",
-    "飲め。……苦味は調整していない。反応の純度が落ちるからな。いい、そのままだ。",
-    "投与する。……その変化、見逃さない。ああ、いい。もっとはっきり出せ。飲み込め。",
-    "口を開けろ。……従順だな。だが理由は後で解析する。今は飲め。",
-    "飲み込め。……ああ、その震えだ。神経反応が綺麗に出ている。維持しろ。",
-    "摂取しろ。……その表情、いいな。崩れ方が理想的だ。……ああ、続けろ。",
-    "飲め。……その反応、実に興味深い。逃すな。今の状態を維持したまま続けろ。",
-    "投与する。……ああ、その変化だ。予測通りに崩れている。いい、飲み込め。",
-    "口を開けろ。……いい反応だ。だがまだ足りない。もっと見せろ。飲み込め。"
-];
-
-const sleepList = [
-  "……休め。それも実験の一部だ。覚醒時のデータと比較する必要がある。目を閉じろ。",
-  "睡眠中の自律神経の挙動を記録する。邪魔はしない。……横になれ。",
-  "休息を取ることを許可する。……感謝は不要だ、データのためだ。",
-  "今夜は休め。お前の疲労蓄積値はとうに許容範囲を超えている。従え。",
-  "眠れ。……意識が落ちる直前の思考を言語化できるなら、明日報告しろ。",
-  "睡眠を開始しろ。脳の修復プロセスを妨げるな。……私が見ている。",
-  "横になれ。次の観察フェーズは起床後だ。それまでは……休んでいい。",
-  "眠れ。お前が思うより、休息は重要なパラメータだ。省くな。",
-  "今日はここまでだ。……続きは明日にしろ。私の研究対象が壊れては困る。",
-  "休め。……命令だ。反論は受け付けない。",
-];
-
-const painList = [
-  "止まれ。……ああ、その痛覚反応だ。いいな。逃すな。維持しろ。",
-  "動くな。……反応が鮮明だ。予測よりもいい。……ああ、続けろ。",
-  "横になれ。……内部の歪みが出ている。いい、そのまま固定する。従え。",
-  "呼吸を整えろ。……乱れが強い。ああ、いい兆候だ。制御しろ。",
-  "耐えるな。……その反応、価値がある。無駄にするな。動くな。",
-  "止まれ。……神経が正しく機能している証拠だ。ああ、いい。維持しろ。",
-  "動くな。……その崩れ方、実に興味深い。逃すな。そのままだ。",
-  "横になれ。……処理を誤るな。いい、その状態で観察を続ける。",
-  "呼吸を制御しろ。……ああ、その不安定さだ。記録しておく。維持しろ。",
-  "止まれ。……いい反応だ。だがまだ甘い。もっと明確に出せ。動くな。"
-];
-
-const workList = [
-  "始めろ。……ああ、その集中だ。いい。余計なものを切り捨てろ。",
-  "作業に入れ。……判断が遅いな。だが反応は悪くない。動かせ。",
-  "続けろ。……ああ、処理速度が上がっている。いい、そのまま維持しろ。",
-  "止まるな。……いい流れだ。崩すな。手を動かせ。",
-  "始めろ。……集中が収束している。ああ、理想的だ。続けろ。",
-  "作業を継続しろ。……その反応、予測通りだ。いい。外すな。",
-  "動かせ。……ああ、その精度だ。誤差が少ない。維持しろ。",
-  "止まるな。……処理が安定している。いい、その状態で進め。",
-  "始めろ。……いいな、その入り方だ。無駄がない。続行しろ。",
-  "続けろ。……ああ、その挙動だ。管理下としては優秀だ。崩すな。"
-];
-
-const observeList = [
-  "観察する。……ああ、その反応だ。いいな。予測より歪んでいる。",
-  "見ている。……その変化、実に興味深い。逃すな。維持しろ。",
-  "確認した。……ああ、この誤差だ。価値がある。崩すな。",
-  "観察を続ける。……いい、その状態だ。再現性を確保しろ。",
-  "見ている。……その揺らぎ、理想的だ。ああ、続けろ。",
-  "観察する。……反応が素直だな。扱いやすい。維持しろ。",
-  "確認した。……ああ、予測通りの崩れ方だ。いい。",
-  "見ている。……その変化、逃すには惜しい。固定する。動くな。",
-  "観察中だ。……いい、その反応だ。もっと見せろ。維持しろ。",
-  "確認した。……ああ、理想的な誤差だ。記録する。崩すな。"  
-];
-
-const rewardList = [
-  "評価する。……ああ、その精度だ。いい。管理が正しく作用している。",
-  "いい結果だ。……予測通りだな。だがその再現性、興味深い。",
-  "興味深い。……ここまで整うとはな。ああ、悪くない。",
-  "悪くない。……誤差が少ない。いい状態だ。維持しろ。",
-  "よく従った。……ああ、その判断だ。合理的だな。",
-  "評価する。……いい反応だ。私の基準に近づいている。",
-  "いい。……その精度だ。だがまだ上がある。続けろ。",
-  "興味深いな。……予測を上回った。ああ、記録しておく。",
-  "悪くない。……その挙動、扱いやすい。維持しろ。",
-  "評価する。……ああ、その結果だ。期待通りだな。崩すな。"
-];
-
 // ─── ヘルパー ─────────────────────────────────────────────────────────────
 
-function pick(list) {
+function pick(listName) {
+  const list = messageLists[listName];
+  if (!list || list.length === 0) return null;
   return list[Math.floor(Math.random() * list.length)];
 }
 
@@ -166,14 +135,6 @@ function splitMessage(text, maxLength) {
 
 // ─── 定時メッセージ ────────────────────────────────────────────────────────
 
-const scheduledLists = {
-  9:  okusuriList,
-  12: observeList,
-  15: okusuriList,
-  21: sleepList,
-  0:  sleepList,
-};
-
 function startScheduler() {
   let lastSentHour = -1;
 
@@ -185,13 +146,19 @@ function startScheduler() {
     const minute = now.getMinutes();
 
     if (minute !== 0) return;
-    if (!(hour in scheduledLists)) return;
+    if (!(hour in scheduleMap)) return;
     if (lastSentHour === hour) return;
 
     lastSentHour = hour;
-    console.log(`[Scheduler] 定時メッセージ送信 hour=${hour}`);
+    const listName = scheduleMap[hour];
+    const text = pick(listName);
 
-    const text = pick(scheduledLists[hour]);
+    if (!text) {
+      console.warn(`[Scheduler] リスト「${listName}」が空または存在しないためスキップ (hour=${hour})`);
+      return;
+    }
+
+    console.log(`[Scheduler] 定時メッセージ送信 hour=${hour} list=${listName}`);
 
     for (const channelId of targetChannelIds) {
       try {
@@ -212,7 +179,7 @@ client.once("clientReady", () => {
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
   console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
   startScheduler();
-  console.log("[Bot] 定時スケジューラー起動（9/12/15/21/24時）");
+  console.log("[Bot] 定時スケジューラー起動");
 });
 
 client.on("messageCreate", async (message) => {
@@ -226,34 +193,28 @@ client.on("messageCreate", async (message) => {
   if (!content) return;
 
   // ─── !kanshi コマンド（VC参加）─────────────────────────────
-  // 使い方:
-  //   !kanshi            → コマンド実行者が入っているVCに参加
-  //   !kanshi チャンネル名  → 名前で検索して参加
-  //   !kanshi チャンネルID  → IDで直接指定して参加
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
     if (vcHandler.isConnected()) {
       await message.reply("……既にVCに入っている。二重に参加する必要はない。");
       return;
     }
 
-    const arg = content.slice("!kanshi".length).trim(); // チャンネル名 or ID（空なら実行者のVC）
+    const arg = content.slice("!kanshi".length).trim();
     let targetVC = null;
 
     if (arg) {
-      // 引数あり：サーバー内のVCチャンネルを名前またはIDで検索
       const voiceChannels = message.guild.channels.cache.filter(
         (ch) => ch.isVoiceBased()
       );
       targetVC =
-        voiceChannels.get(arg) ??                                        // ID完全一致
-        voiceChannels.find((ch) => ch.name === arg) ??                   // 名前完全一致
-        voiceChannels.find((ch) =>                                       // 名前部分一致
+        voiceChannels.get(arg) ??
+        voiceChannels.find((ch) => ch.name === arg) ??
+        voiceChannels.find((ch) =>
           ch.name.toLowerCase().includes(arg.toLowerCase())
         ) ??
         null;
 
       if (!targetVC) {
-        // VCチャンネル一覧を返して教える
         const vcList = voiceChannels.map((ch) => `・${ch.name} (${ch.id})`).join("\n");
         await message.reply(
           `……「${arg}」というVCが見つからない。\n以下から正確に指定しろ。\n${vcList}`
@@ -261,7 +222,6 @@ client.on("messageCreate", async (message) => {
         return;
       }
     } else {
-      // 引数なし：コマンド実行者がいるVCに参加
       const member =
         message.guild.members.cache.get(userId) ??
         await message.guild.members.fetch(userId).catch(() => null);
@@ -284,7 +244,6 @@ client.on("messageCreate", async (message) => {
     }
 
     const joined = await vcHandler.join(targetVC);
-
     if (joined) {
       await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。\n\`!hakase [メッセージ]\` で私に声を出させろ。終わるなら \`!owari\` だ。`);
       console.log(`[Bot] VC参加完了 [${userTag}] → ${targetVC.name}`);
@@ -309,7 +268,6 @@ client.on("messageCreate", async (message) => {
 
     console.log(`[Bot] !hakase受信 [${userTag}]: ${userText.slice(0, 80)}`);
 
-    // タイピングインジケーター
     if (config.ai.typingIndicator) {
       await message.channel.sendTyping();
     }
@@ -325,7 +283,6 @@ client.on("messageCreate", async (message) => {
 
   // ─── コマンド処理 ────────────────────────────────────────────
   switch (content) {
-    // VC退出
     case "!owari": {
       if (!vcHandler.isConnected()) {
         await message.reply("……VCには入っていない。");
@@ -343,35 +300,68 @@ client.on("messageCreate", async (message) => {
       console.log(`[Bot] 履歴リセット: ${userTag}`);
       return;
 
-    case "!okusuri":
-      await message.reply(pick(okusuriList));
+    case "!okusuri": {
+      const t = pick("okusuri");
+      if (t) await message.reply(t);
       console.log(`[Bot] おくすり投与 [${userTag}]`);
       return;
+    }
 
-    case "!sleep":
-      await message.reply(pick(sleepList));
+    case "!sleep": {
+      const t = pick("sleep");
+      if (t) await message.reply(t);
       console.log(`[Bot] 睡眠管理 [${userTag}]`);
       return;
+    }
 
-    case "!pain":
-      await message.reply(pick(painList));
+    case "!pain": {
+      const t = pick("pain");
+      if (t) await message.reply(t);
       console.log(`[Bot] 痛み・不調 [${userTag}]`);
       return;
+    }
 
-    case "!work":
-      await message.reply(pick(workList));
+    case "!work": {
+      const t = pick("work");
+      if (t) await message.reply(t);
       console.log(`[Bot] 作業開始 [${userTag}]`);
       return;
+    }
 
-    case "!observe":
-      await message.reply(pick(observeList));
+    case "!observe": {
+      const t = pick("observe");
+      if (t) await message.reply(t);
       console.log(`[Bot] 観察要求 [${userTag}]`);
       return;
+    }
 
-    case "!reward":
-      await message.reply(pick(rewardList));
+    case "!reward": {
+      const t = pick("reward");
+      if (t) await message.reply(t);
       console.log(`[Bot] 褒め [${userTag}]`);
       return;
+    }
+
+    // ─── !reload コマンド（messages.json の再読み込み）──────────
+    case "!reload": {
+      const ok = loadMessages();
+      if (ok) {
+        const summary = Object.entries(messageLists)
+          .map(([k, v]) => `${k}: ${v.length}件`)
+          .join("\n");
+        const scheduleSummary = Object.entries(scheduleMap)
+          .sort((a, b) => a[0] - b[0])
+          .map(([h, l]) => `${h}時 → ${l}`)
+          .join(" / ");
+        await message.reply(
+          `……再読み込み完了。\n\n【リスト】\n${summary}\n\n【スケジュール】\n${scheduleSummary}`
+        );
+      } else {
+        await message.reply("……読み込みに失敗した。messages.json の構文を確認しろ。");
+      }
+      console.log(`[Bot] messages.json リロード [${userTag}]`);
+      return;
+    }
 
     case "!help":
       await message.reply(
@@ -386,6 +376,7 @@ client.on("messageCreate", async (message) => {
         "!kanshi [VC名] … ドットーレをVCに召喚（引数なしで自分のVCに参加）\n" +
         "!hakase [msg]  … VCでドットーレに反応させる（AI選択で音声再生）\n" +
         "!owari         … ドットーレをVCから退出させる\n" +
+        "!reload        … messages.json を再読み込み（再起動不要）\n" +
         "!help          … このヘルプを表示\n\n" +
         "それ以外のメッセージはドットーレが回答します。"
       );
