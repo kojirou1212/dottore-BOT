@@ -146,10 +146,28 @@ function startScheduler() {
     const minute = now.getMinutes();
 
     if (minute !== 0) return;
-    if (!(hour in scheduleMap)) return;
     if (lastSentHour === hour) return;
-
     lastSentHour = hour;
+
+    // ─── 毎朝4時に自動再起動 ──────────────────────────────────
+    if (hour === 4) {
+      console.log("[Scheduler] 定期再起動 (04:00 JST) を実行します...");
+      try {
+        for (const channelId of targetChannelIds) {
+          const channel = await client.channels.fetch(channelId).catch(() => null);
+          if (channel?.isTextBased()) {
+            await channel.send("……定期メンテナンスだ。少し待て。").catch(() => {});
+          }
+        }
+      } finally {
+        setTimeout(() => process.exit(0), 3000);
+      }
+      return;
+    }
+
+    // ─── 定時メッセージ ───────────────────────────────────────
+    if (!(hour in scheduleMap)) return;
+
     const listName = scheduleMap[hour];
     const text = pick(listName);
 
