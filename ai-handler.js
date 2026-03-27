@@ -126,7 +126,18 @@ class AIHandler {
           : response.text;
 
         if (!text || text.trim() === "") {
-          throw new Error("AIからの応答が空でした。");
+          // 安全フィルター等によるブロックを確認
+          const candidate = response.candidates?.[0];
+          const finishReason = candidate?.finishReason ?? "UNKNOWN";
+          console.warn(`[AIHandler] 空応答 finishReason=${finishReason}`);
+
+          if (finishReason === "SAFETY") {
+            return "……(その話題には応答できない)";
+          }
+          if (finishReason === "RECITATION") {
+            return "……(著作権の都合で応答できない)";
+          }
+          throw new Error(`AIからの応答が空でした。(finishReason=${finishReason})`);
         }
 
         return text;
