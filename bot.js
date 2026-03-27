@@ -153,12 +153,8 @@ function startScheduler() {
     if (hour === 4) {
       console.log("[Scheduler] 定期再起動 (04:00 JST) を実行します...");
       try {
-        for (const channelId of targetChannelIds) {
-          const channel = await client.channels.fetch(channelId).catch(() => null);
-          if (channel?.isTextBased()) {
-            await channel.send("……定期メンテナンスだ。少し待て。").catch(() => {});
-          }
-        }
+        // 全ユーザーの会話履歴をリセット
+        aiHandler.clearAllHistory();
       } finally {
         setTimeout(() => process.exit(0), 3000);
       }
