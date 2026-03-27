@@ -314,6 +314,12 @@ client.on("messageCreate", async (message) => {
       console.log(`[Bot] 履歴リセット: ${userTag}`);
       return;
 
+    case "!resetall":
+      aiHandler.clearAllHistory();
+      await message.reply("……全員分だ。記憶操作の薬を投与した。逆らうな。");
+      console.log(`[Bot] 全履歴リセット: ${userTag}`);
+      return;
+
     case "!okusuri": {
       const t = pick("okusuri");
       if (t) await message.reply(t);
@@ -380,7 +386,8 @@ client.on("messageCreate", async (message) => {
     case "!help":
       await message.reply(
         "【コマンド一覧】\n" +
-        "!reset         … 会話履歴をリセット\n" +
+        "!reset         … 自分の会話履歴をリセット\n" +
+        "!resetall      … 全ユーザーの会話履歴をリセット\n" +
         "!okusuri       … 薬を投与してもらう\n" +
         "!sleep         … 就寝前、管理下で休む\n" +
         "!pain          … 痛み・不調を報告する\n" +
