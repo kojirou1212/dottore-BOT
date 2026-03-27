@@ -19,6 +19,13 @@ class AIHandler {
     this.conversationHistory.delete(userId);
   }
 
+  clearAllHistory() {
+    const count = this.conversationHistory.size;
+    this.conversationHistory.clear();
+    console.log(`[AIHandler] 全ユーザーの会話履歴をクリア (${count}件)`);
+    return count;
+  }
+
   // 履歴が user/model 交互・各エントリが有効かを検証・修復する
   sanitizeHistory(history) {
     // parts が空または text が空文字のエントリを除去
