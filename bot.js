@@ -49,18 +49,23 @@ if (!config.gemini.apiKey) {
   process.exit(1);
 }
 
+// ─── 動作モード ────────────────────────────────────────────────────────────
+// BOT_MODE=text → テキスト専用（OCI等クラウド）VCコマンドを無視
+// BOT_MODE=vc   → VC専用（自宅PC）VCコマンドのみ処理、AI応答しない
+// 未設定 / all  → 両方処理（従来通り）
+const BOT_MODE = process.env.BOT_MODE || "all";
+
 // ─── メッセージリストの読み込み ───────────────────────────────────────────
 const MESSAGES_PATH = path.join(__dirname, "messages.json");
 
-let messageLists = {};   // { okusuri: [...], sleep: [...], ... }
-let scheduleMap = {};    // { 9: "okusuri", 21: "sleep", ... }
+let messageLists = {};
+let scheduleMap = {};
 
 function loadMessages() {
   try {
     const raw = fs.readFileSync(MESSAGES_PATH, "utf-8");
     const data = JSON.parse(raw);
 
-    // スケジュール設定をパース（キーを数値に変換）
     const newSchedule = {};
     for (const [hourStr, listName] of Object.entries(data.schedule || {})) {
       if (hourStr.startsWith("_")) continue;
@@ -70,7 +75,6 @@ function loadMessages() {
       }
     }
 
-    // リストをパース（予約キーを除外）
     const newLists = {};
     for (const [key, val] of Object.entries(data)) {
       if (key === "schedule" || key.startsWith("_")) continue;
@@ -94,7 +98,6 @@ function loadMessages() {
   }
 }
 
-// 起動時に読み込み
 if (!fs.existsSync(MESSAGES_PATH)) {
   console.error(`[Messages] ${MESSAGES_PATH} が見つかりません。messages.json を作成してください。`);
   process.exit(1);
@@ -133,9 +136,12 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
-// ─── 定時メッセージ ────────────────────────────────────────────────────────
+// ─── 定時メッセージ（テキストモード or allのみ）──────────────────────────
 
 function startScheduler() {
+  // VCモード専用の場合は定時メッセージ不要
+  if (BOT_MODE === "vc") return;
+
   let lastSentHour = -1;
 
   setInterval(async () => {
@@ -149,11 +155,9 @@ function startScheduler() {
     if (lastSentHour === hour) return;
     lastSentHour = hour;
 
-    // ─── 毎朝4時に自動再起動 ──────────────────────────────────
     if (hour === 4) {
       console.log("[Scheduler] 定期再起動 (04:00 JST) を実行します...");
       try {
-        // 全ユーザーの会話履歴をリセット
         aiHandler.clearAllHistory();
       } finally {
         setTimeout(() => process.exit(0), 3000);
@@ -161,7 +165,6 @@ function startScheduler() {
       return;
     }
 
-    // ─── 定時メッセージ ───────────────────────────────────────
     if (!(hour in scheduleMap)) return;
 
     const listName = scheduleMap[hour];
@@ -192,8 +195,11 @@ client.once("clientReady", () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
   console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
+  console.log(`[Bot] 動作モード: ${BOT_MODE}`);
   startScheduler();
-  console.log("[Bot] 定時スケジューラー起動");
+  if (BOT_MODE !== "vc") {
+    console.log("[Bot] 定時スケジューラー起動");
+  }
 });
 
 client.on("messageCreate", async (message) => {
@@ -205,6 +211,23 @@ client.on("messageCreate", async (message) => {
   const content = message.content.trim();
 
   if (!content) return;
+
+  // ─── モードによる振り分け ─────────────────────────────────────────────
+  const isVCCommand =
+    content === "!kanshi" ||
+    content.startsWith("!kanshi ") ||
+    content === "!hakase" ||
+    content.startsWith("!hakase ") ||
+    content === "!owari";
+
+  if (BOT_MODE === "text" && isVCCommand) {
+    // テキストモード：VCコマンドは完全無視（自宅PCが処理する）
+    return;
+  }
+  if (BOT_MODE === "vc" && !isVCCommand) {
+    // VCモード：VC以外のコマンドはすべて無視
+    return;
+  }
 
   // ─── !kanshi コマンド（VC参加）─────────────────────────────
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
@@ -362,7 +385,6 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // ─── !reload コマンド（messages.json の再読み込み）──────────
     case "!reload": {
       const ok = loadMessages();
       if (ok) {
