@@ -107,6 +107,35 @@ class VCHandler {
     return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
   }
 
+  // ── レスポンスからテキストを取り出す ─────────────────────────────────────
+  _extractText(response) {
+    // 方法1: candidates から直接取得（最も確実）
+    const fromCandidates = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (fromCandidates && fromCandidates.trim() !== "") {
+      console.log(`[VCHandler] テキスト取得方法: candidates`);
+      return fromCandidates.trim();
+    }
+
+    // 方法2: response.text が関数
+    if (typeof response?.text === "function") {
+      const t = response.text();
+      if (t && t.trim() !== "") {
+        console.log(`[VCHandler] テキスト取得方法: text()`);
+        return t.trim();
+      }
+    }
+
+    // 方法3: response.text が文字列
+    if (typeof response?.text === "string" && response.text.trim() !== "") {
+      console.log(`[VCHandler] テキスト取得方法: text string`);
+      return response.text.trim();
+    }
+
+    // デバッグ用：レスポンス構造をログに出す
+    console.warn("[VCHandler] テキスト取得失敗。レスポンス構造:", JSON.stringify(response, null, 2).slice(0, 500));
+    return "";
+  }
+
   // ── AIによる音声選択 ─────────────────────────────────────────────────────
   async selectSound(userMessage) {
     const available = SOUND_BOARD.filter((s) => !this.usedSounds.has(s.file));
@@ -138,16 +167,7 @@ ${soundList}
         config: { maxOutputTokens: 10 },
       });
 
-      // response.text の取得（関数・文字列・candidates の3段階でフォールバック）
-      let raw = "";
-      if (typeof response.text === "function") {
-        raw = response.text() ?? "";
-      } else if (typeof response.text === "string") {
-        raw = response.text;
-      } else {
-        raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      }
-      raw = raw.toString().trim();
+      const raw = this._extractText(response);
       console.log(`[VCHandler] AI生応答: "${raw}"`);
 
       const index = parseInt(raw, 10);
