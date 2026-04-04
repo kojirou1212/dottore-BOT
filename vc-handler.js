@@ -107,35 +107,6 @@ class VCHandler {
     return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
   }
 
-  // ── レスポンスからテキストを取り出す ─────────────────────────────────────
-  _extractText(response) {
-    // 方法1: candidates から直接取得（最も確実）
-    const fromCandidates = response?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (fromCandidates && fromCandidates.trim() !== "") {
-      console.log(`[VCHandler] テキスト取得方法: candidates`);
-      return fromCandidates.trim();
-    }
-
-    // 方法2: response.text が関数
-    if (typeof response?.text === "function") {
-      const t = response.text();
-      if (t && t.trim() !== "") {
-        console.log(`[VCHandler] テキスト取得方法: text()`);
-        return t.trim();
-      }
-    }
-
-    // 方法3: response.text が文字列
-    if (typeof response?.text === "string" && response.text.trim() !== "") {
-      console.log(`[VCHandler] テキスト取得方法: text string`);
-      return response.text.trim();
-    }
-
-    // デバッグ用：レスポンス構造をログに出す
-    console.warn("[VCHandler] テキスト取得失敗。レスポンス構造:", JSON.stringify(response, null, 2).slice(0, 500));
-    return "";
-  }
-
   // ── AIによる音声選択 ─────────────────────────────────────────────────────
   async selectSound(userMessage) {
     const available = SOUND_BOARD.filter((s) => !this.usedSounds.has(s.file));
@@ -161,16 +132,21 @@ ${soundList}
 他の文字は一切含めないでください。数字のみです。`;
 
     try {
-      const response = await this.ai.models.generateContent({
+      // ai-handler.js と同じ chat.sendMessage 方式を使用
+      const chat = this.ai.chats.create({
         model: this.config.gemini.model,
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: { maxOutputTokens: 10 },
       });
 
-      const raw = this._extractText(response);
-      console.log(`[VCHandler] AI生応答: "${raw}"`);
+      const response = await chat.sendMessage({ message: prompt });
 
-      const index = parseInt(raw, 10);
+      const raw = typeof response.text === "function"
+        ? (response.text() ?? "")
+        : (response.text ?? "");
+      const trimmed = raw.toString().trim();
+      console.log(`[VCHandler] AI生応答: "${trimmed}"`);
+
+      const index = parseInt(trimmed, 10);
 
       if (!isNaN(index) && index >= 0 && index < available.length) {
         const chosen = available[index];
@@ -179,7 +155,7 @@ ${soundList}
         return chosen;
       }
 
-      console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
+      console.warn(`[VCHandler] AI応答パース失敗: "${trimmed}" → ランダム選択`);
       return this._randomFallback(available);
     } catch (err) {
       console.error("[VCHandler] AI音声選択エラー:", err.message);
