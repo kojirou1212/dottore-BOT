@@ -36,40 +36,31 @@ const SOUND_BOARD = [
   { name: "動くな。",                 file: "動くな。.mp3",                      tags: ["制止", "命令", "威圧", "止まれ"] },
 ];
 
-// ── ファイル名のファジー正規化 ────────────────────────────────────────────
-// っ/ッ・全角/半角括弧・.../ … の差異を吸収する
+// ── ファジー正規化 ─────────────────────────────────────────────────────────
 function fuzzyNormalize(filename) {
   return filename
     .normalize("NFC")
-    .replace(/っ/g, "ッ")           // ひらがな小文字 → カタカナ
-    .replace(/\.\.\./g, "…")       // 3点リーダー → 省略記号
-    .replace(/\(/g, "（")           // 半角 ( → 全角
-    .replace(/\)/g, "）");          // 半角 ) → 全角
+    .replace(/っ/g, "ッ")
+    .replace(/\.\.\./g, "…")
+    .replace(/\(/g, "（")
+    .replace(/\)/g, "）");
 }
 
-// ── 実ファイルとのマッチング ─────────────────────────────────────────────
-// 対象ファイル名に最もよく一致する実ファイル名を返す
-// 1. 完全一致（NFC）
-// 2. ファジー正規化後に一致
-// 3. 見つからなければ null
 function findActualFile(targetFileName, actualFiles) {
-  const targetNFC = targetFileName.normalize("NFC");
-  const exact = actualFiles.find((f) => f.normalize("NFC") === targetNFC);
+  const exact = actualFiles.find((f) => f.normalize("NFC") === targetFileName.normalize("NFC"));
   if (exact) return exact;
-
   const targetFuzzy = fuzzyNormalize(targetFileName);
   const fuzzy = actualFiles.find((f) => fuzzyNormalize(f) === targetFuzzy);
   return fuzzy ?? null;
 }
 
-// ── 起動時ファイル確認 ────────────────────────────────────────────────────
+// ── 起動時ファイル確認（NGはhex出力）────────────────────────────────────────
 function checkSoundFiles() {
   const soundsDir = path.join(__dirname, "sounds");
   if (!fs.existsSync(soundsDir)) {
     console.warn("[VCHandler] sounds/ フォルダが存在しません。");
     return;
   }
-
   const actualFiles = fs.readdirSync(soundsDir);
   let okCount = 0;
   let ngCount = 0;
@@ -82,11 +73,21 @@ function checkSoundFiles() {
       }
       okCount++;
     } else {
-      console.warn(`[VCHandler] NG (マッチなし): "${entry.file}"`);
+      const hex = Buffer.from(entry.file, "utf8").toString("hex");
+      console.warn(`[VCHandler] NG: "${entry.file}"`);
+      console.warn(`  hex全体: ${hex}`);
+      // 実ファイルから先頭3文字が一致するものを候補として表示
+      const prefix = entry.file.normalize("NFC").slice(0, 3);
+      actualFiles
+        .filter((f) => f.normalize("NFC").startsWith(prefix))
+        .forEach((f) => {
+          const fhex = Buffer.from(f, "utf8").toString("hex");
+          console.warn(`  実ファイル候補: "${f}"`);
+          console.warn(`  hex全体: ${fhex}`);
+        });
       ngCount++;
     }
   }
-
   console.log(`[VCHandler] ファイル確認: ${okCount}件OK / ${ngCount}件NG`);
 }
 
@@ -127,7 +128,6 @@ class VCHandler {
         selfDeaf: false,
         selfMute: false,
       });
-
       await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
       if (this.player) this.connection.subscribe(this.player);
       this.usedSounds.clear();
@@ -160,7 +160,7 @@ class VCHandler {
     return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
   }
 
-  // ── AIによる音声選択（REST API直接呼び出し）──────────────────────────────
+  // ── AIによる音声選択 ──────────────────────────────────────────────────────
   async selectSound(userMessage) {
     const available = SOUND_BOARD.filter((s) => !this.usedSounds.has(s.file));
     if (available.length === 0) {
@@ -200,12 +200,23 @@ ${soundList}
 
       const data = await res.json();
 
+      // APIエラー確認
       if (data.error) {
         console.error(`[VCHandler] API エラー: ${data.error.code} - ${data.error.message}`);
         return this._randomFallback(available);
       }
 
-      const raw = (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
+      // レスポンス全体をログ出力（AI空応答のデバッグ用）
+      const candidate = data.candidates?.[0];
+      console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"}`);
+      console.log(`[VCHandler] candidatesCount: ${data.candidates?.length ?? 0}`);
+      if (candidate?.content?.parts) {
+        console.log(`[VCHandler] parts:`, JSON.stringify(candidate.content.parts));
+      } else {
+        console.log(`[VCHandler] レスポンス全体:`, JSON.stringify(data).slice(0, 300));
+      }
+
+      const raw = (candidate?.content?.parts?.[0]?.text ?? "").trim();
       console.log(`[VCHandler] AI生応答: "${raw}"`);
 
       const index = parseInt(raw, 10);
@@ -230,7 +241,7 @@ ${soundList}
     return chosen;
   }
 
-  // ── 音声ファイルの再生（ファジーマッチング対応）──────────────────────────
+  // ── 音声ファイルの再生 ────────────────────────────────────────────────────
   async playSound(soundEntry) {
     if (!this.vcAvailable || !this.player) {
       console.warn("[VCHandler] 音声再生不可（@discordjs/voice 未インストール）");
@@ -251,7 +262,6 @@ ${soundList}
     }
 
     const filePath = path.join(soundsDir, matched);
-
     try {
       const { createAudioResource } = voiceLib;
       const resource = createAudioResource(filePath);
@@ -269,7 +279,6 @@ ${soundList}
   async respondToMessage(userMessage) {
     const sound = await this.selectSound(userMessage);
     if (!sound) return null;
-
     const played = await this.playSound(sound);
     return played ? sound : null;
   }
