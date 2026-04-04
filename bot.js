@@ -1,207 +1,456 @@
-// vc-handler.js
-// ボイスチャンネル接続・音声再生・AI音声選択ロジック
+// bot.js
+// Discord Bot メインエントリーポイント
 
-const { GoogleGenAI } = require("@google/genai");
-const path = require("path");
+const { Client, GatewayIntentBits } = require("discord.js");
 const fs = require("fs");
+const path = require("path");
+const AIHandler = require("./ai-handler");
+const { VCHandler } = require("./vc-handler");
 
-// ── @discordjs/voice の遅延ロード ─────────────────────────────────────────
-let voiceLib = null;
-try {
-  voiceLib = require("@discordjs/voice");
-  console.log("[VCHandler] @discordjs/voice ロード成功");
-} catch {
-  console.warn("[VCHandler] @discordjs/voice が見つかりません。VC機能は無効です。");
-  console.warn("[VCHandler] 有効にするには: npm install @discordjs/voice ffmpeg-static opusscript");
+// ─── 設定の読み込み（環境変数優先、なければ config.json）─────────────────
+let config;
+
+if (process.env.DISCORD_TOKEN) {
+  config = {
+    discord: {
+      token: process.env.DISCORD_TOKEN,
+      targetChannelIds: process.env.TARGET_CHANNEL_IDS
+        ? process.env.TARGET_CHANNEL_IDS.split(",").map((s) => s.trim())
+        : [],
+      voiceChannelId: process.env.VOICE_CHANNEL_ID || "",
+    },
+    gemini: {
+      apiKey: process.env.GEMINI_API_KEY,
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      maxTokens: parseInt(process.env.MAX_TOKENS || "1000", 10),
+      maxHistoryLength: parseInt(process.env.MAX_HISTORY_LENGTH || "20", 10),
+    },
+    ai: {
+      systemPrompt: process.env.SYSTEM_PROMPT || "You are a helpful assistant.",
+      errorMessage: process.env.ERROR_MESSAGE || "(頭を抱え)",
+      typingIndicator: process.env.TYPING_INDICATOR !== "false",
+    },
+  };
+} else {
+  const configPath = path.join(__dirname, "config.json");
+  if (!fs.existsSync(configPath)) {
+    console.error("[Bot] config.json が見つかりません。環境変数 DISCORD_TOKEN を設定するか、config.json を作成してください。");
+    process.exit(1);
+  }
+  config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 }
 
-// ── サウンドボード定義 ────────────────────────────────────────────────────
-const SOUND_BOARD = [
-  { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",               tags: ["否定", "反論", "ありえない", "驚き"] },
-  { name: "おっと、すまない",         file: "おっと、すまない.mp3",               tags: ["謝罪", "失礼", "すまない", "軽い謝り"] },
-  { name: "やられ",                   file: "ぐあああああっ！！！(やられ).mp3",   tags: ["やられ", "敗北", "ダメージ", "絶叫"] },
-  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおっ...！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
-  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおっ！！(被ダメ１).mp3",        tags: ["叫び", "ダメージ", "衝撃"] },
-  { name: "ごきげんよう",             file: "ごきげんよう。.mp3",                 tags: ["挨拶", "上機嫌", "余裕", "去り際"] },
-  { name: "さようならと言わなくては", file: "さようならと言わなくては.mp3",       tags: ["別れ", "去り際", "皮肉", "余裕"] },
-  { name: "耐える声",                 file: "ぬあああああああっ...！！(耐え).mp3", tags: ["耐える", "苦しい", "我慢", "痛み"] },
-  { name: "溜息",                     file: "はぁ...(溜息).mp3",                  tags: ["ため息", "呆れ", "疲れ", "落胆"] },
-  { name: "笑い声1",                  file: "はっはっはっは....mp3",              tags: ["笑", "高笑い", "嘲笑", "面白い"] },
-  { name: "笑い声2",                  file: "ははは....mp3",                      tags: ["笑", "面白い", "可笑しい"] },
-  { name: "笑い声3",                  file: "ふふ....mp3",                        tags: ["笑", "含み笑い", "余裕", "皮肉"] },
-  { name: "ふ...",                    file: "ふ....mp3",                          tags: ["呆れ", "鼻で笑う", "軽蔑", "余裕"] },
-  { name: "ふん...",                  file: "ふん.mp3",                           tags: ["呆れ", "無視", "ため息", "興味なし"] },
-  { name: "ほう？",                   file: "ほう？.mp3",                         tags: ["興味", "驚き", "なるほど", "反応"] },
-  { name: "ん？",                     file: "ん？.mp3",                           tags: ["疑問", "聞き返し", "確認", "怪訝"] },
-  { name: "絶対に後悔するよ！",       file: "絶対に後悔するよ！.mp3",             tags: ["脅し", "警告", "怒り", "後悔"] },
-  { name: "動くな。",                 file: "動くな。.mp3",                       tags: ["制止", "命令", "威圧", "止まれ"] },
-];
+if (!config.discord.token) {
+  console.error("[Bot] Discord トークンが設定されていません。");
+  process.exit(1);
+}
+if (!config.gemini.apiKey) {
+  console.error("[Bot] Gemini API キーが設定されていません。");
+  process.exit(1);
+}
 
-class VCHandler {
-  constructor(config) {
-    this.config = config;
-    this.connection = null;
-    this.player = null;
-    this.isPlaying = false;
-    this.usedSounds = new Set();
-    this.ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    this.vcAvailable = voiceLib !== null;
-    this.playAvailable = false;
+// ─── 動作モード ────────────────────────────────────────────────────────────
+// BOT_MODE=text → テキスト専用（OCI等クラウド）VCコマンドを無視
+// BOT_MODE=vc   → VC専用（自宅PC）VCコマンドのみ処理、AI応答しない
+// 未設定 / all  → 両方処理（従来通り）
+const BOT_MODE = process.env.BOT_MODE || "all";
 
-    if (this.vcAvailable) {
-      const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
-      this.player = createAudioPlayer();
-      this.player.on(AudioPlayerStatus.Idle, () => { this.isPlaying = false; });
-      this.player.on("error", (err) => {
-        console.error("[VCHandler] AudioPlayer error:", err.message);
-        this.isPlaying = false;
-      });
+// ─── メッセージリストの読み込み ───────────────────────────────────────────
+const MESSAGES_PATH = path.join(__dirname, "messages.json");
+
+let messageLists = {};
+let scheduleMap = {};
+
+function loadMessages() {
+  try {
+    const raw = fs.readFileSync(MESSAGES_PATH, "utf-8");
+    const data = JSON.parse(raw);
+
+    const newSchedule = {};
+    for (const [hourStr, listName] of Object.entries(data.schedule || {})) {
+      if (hourStr.startsWith("_")) continue;
+      const hour = parseInt(hourStr, 10);
+      if (!isNaN(hour) && typeof listName === "string") {
+        newSchedule[hour] = listName;
+      }
     }
-  }
 
-  // ── VC への参加 ─────────────────────────────────────────────────────────
-  async join(voiceChannel) {
-    if (!this.vcAvailable) {
-      console.warn("[VCHandler] @discordjs/voice 未インストールのため参加不可");
-      return false;
+    const newLists = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (key === "schedule" || key.startsWith("_")) continue;
+      if (Array.isArray(val) && val.length > 0) {
+        newLists[key] = val;
+      }
     }
-    const { joinVoiceChannel, VoiceConnectionStatus, entersState } = voiceLib;
-    try {
-      this.connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: voiceChannel.guild.id,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-        selfDeaf: false,
-        selfMute: false,
-      });
 
-      await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
-      if (this.player) this.connection.subscribe(this.player);
-      this.usedSounds.clear();
-      console.log(`[VCHandler] VC参加完了: ${voiceChannel.name}`);
-      return true;
-    } catch (err) {
-      console.error("[VCHandler] VC参加失敗:", err.message);
-      this.connection?.destroy();
-      this.connection = null;
-      return false;
-    }
-  }
+    scheduleMap = newSchedule;
+    messageLists = newLists;
 
-  // ── VC からの退出 ────────────────────────────────────────────────────────
-  leave() {
-    if (this.connection) {
-      this.player.stop();
-      this.connection.destroy();
-      this.connection = null;
-      this.usedSounds.clear();
-      console.log("[VCHandler] VC退出完了");
-      return true;
-    }
+    const listSummary = Object.entries(newLists)
+      .map(([k, v]) => `${k}(${v.length}件)`)
+      .join(", ");
+    console.log(`[Messages] 読み込み完了 → ${listSummary}`);
+    console.log(`[Messages] スケジュール → ${JSON.stringify(newSchedule)}`);
+    return true;
+  } catch (err) {
+    console.error("[Messages] 読み込み失敗:", err.message);
     return false;
   }
-
-  isConnected() {
-    if (!this.vcAvailable || !this.connection) return false;
-    const { VoiceConnectionStatus } = voiceLib;
-    return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
-  }
-
-  // ── AIによる音声選択 ─────────────────────────────────────────────────────
-  async selectSound(userMessage) {
-    const available = SOUND_BOARD.filter((s) => !this.usedSounds.has(s.file));
-    if (available.length === 0) {
-      console.log("[VCHandler] 全音声使用済み");
-      return null;
-    }
-
-    const soundList = available
-      .map((s, i) => `${i}: ${s.name} (タグ: ${s.tags.join(", ")})`)
-      .join("\n");
-
-    const prompt = `あなたはDiscordボット「ドットーレ」の音声選択AIです。
-ユーザーのメッセージに対して、ドットーレが反応として最もふさわしい音声を1つ選んでください。
-
-【ユーザーのメッセージ】
-${userMessage}
-
-【選択可能な音声一覧】
-${soundList}
-
-上記リストの番号（0始まりのインデックス）だけを1つ返してください。
-他の文字は一切含めないでください。数字のみです。`;
-
-    try {
-      const response = await this.ai.models.generateContent({
-        model: this.config.gemini.model,
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        config: { maxOutputTokens: 10 },
-      });
-
-      const raw = response.text?.trim?.() ?? String(response.text).trim();
-      const index = parseInt(raw, 10);
-
-      if (!isNaN(index) && index >= 0 && index < available.length) {
-        const chosen = available[index];
-        this.usedSounds.add(chosen.file);
-        console.log(`[VCHandler] AI選択音声: ${chosen.name} (index=${index})`);
-        return chosen;
-      }
-
-      console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
-      return this._randomFallback(available);
-    } catch (err) {
-      console.error("[VCHandler] AI音声選択エラー:", err.message);
-      return this._randomFallback(available);
-    }
-  }
-
-  _randomFallback(available) {
-    const chosen = available[Math.floor(Math.random() * available.length)];
-    this.usedSounds.add(chosen.file);
-    return chosen;
-  }
-
-  // ── 音声ファイルの再生 ────────────────────────────────────────────────────
-  async playSound(soundEntry) {
-    if (!this.vcAvailable || !this.player) {
-      console.warn("[VCHandler] 音声再生不可（@discordjs/voice 未インストール）");
-      return false;
-    }
-    if (!this.isConnected()) {
-      console.warn("[VCHandler] VC未接続のため再生スキップ");
-      return false;
-    }
-
-    const soundsDir = path.join(__dirname, "sounds");
-    const filePath = path.join(soundsDir, soundEntry.file);
-
-    if (!fs.existsSync(filePath)) {
-      console.warn(`[VCHandler] 音声ファイルが見つかりません（スキップ）: ${soundEntry.file}`);
-      return false;
-    }
-
-    try {
-      const { createAudioResource } = voiceLib;
-      const resource = createAudioResource(filePath);
-      this.player.play(resource);
-      this.isPlaying = true;
-      console.log(`[VCHandler] 再生開始: ${soundEntry.name}`);
-      return true;
-    } catch (err) {
-      console.error("[VCHandler] 再生エラー:", err.message);
-      return false;
-    }
-  }
-
-  // ── メッセージに応じて音声を選択して再生（統合メソッド）─────────────────
-  async respondToMessage(userMessage) {
-    const sound = await this.selectSound(userMessage);
-    if (!sound) return null;
-
-    const played = await this.playSound(sound);
-    return played ? sound : null;
-  }
 }
 
-module.exports = { VCHandler, SOUND_BOARD };
+if (!fs.existsSync(MESSAGES_PATH)) {
+  console.error(`[Messages] ${MESSAGES_PATH} が見つかりません。messages.json を作成してください。`);
+  process.exit(1);
+}
+loadMessages();
+
+// ─── クライアントの初期化 ──────────────────────────────────────────────────
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
+  ],
+});
+
+const aiHandler = new AIHandler(config);
+const vcHandler = new VCHandler(config);
+const targetChannelIds = new Set(config.discord.targetChannelIds);
+
+// ─── ヘルパー ─────────────────────────────────────────────────────────────
+
+function pick(listName) {
+  const list = messageLists[listName];
+  if (!list || list.length === 0) return null;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function splitMessage(text, maxLength) {
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    chunks.push(remaining.slice(0, maxLength));
+    remaining = remaining.slice(maxLength);
+  }
+  return chunks;
+}
+
+// ─── 定時メッセージ（テキストモード or allのみ）──────────────────────────
+
+function startScheduler() {
+  // VCモード専用の場合は定時メッセージ不要
+  if (BOT_MODE === "vc") return;
+
+  let lastSentHour = -1;
+
+  setInterval(async () => {
+    const now = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })
+    );
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+
+    if (minute !== 0) return;
+    if (lastSentHour === hour) return;
+    lastSentHour = hour;
+
+    if (hour === 4) {
+      console.log("[Scheduler] 定期再起動 (04:00 JST) を実行します...");
+      try {
+        aiHandler.clearAllHistory();
+      } finally {
+        setTimeout(() => process.exit(0), 3000);
+      }
+      return;
+    }
+
+    if (!(hour in scheduleMap)) return;
+
+    const listName = scheduleMap[hour];
+    const text = pick(listName);
+
+    if (!text) {
+      console.warn(`[Scheduler] リスト「${listName}」が空または存在しないためスキップ (hour=${hour})`);
+      return;
+    }
+
+    console.log(`[Scheduler] 定時メッセージ送信 hour=${hour} list=${listName}`);
+
+    for (const channelId of targetChannelIds) {
+      try {
+        const channel = await client.channels.fetch(channelId);
+        if (!channel || !channel.isTextBased()) continue;
+        await channel.send(text);
+      } catch (chErr) {
+        console.error(`[Scheduler] チャンネル ${channelId} への送信失敗:`, chErr.message);
+      }
+    }
+  }, 60 * 1000);
+}
+
+// ─── イベントハンドラー ────────────────────────────────────────────────────
+
+client.once("clientReady", () => {
+  console.log(`[Bot] ログイン完了: ${client.user.tag}`);
+  console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
+  console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
+  console.log(`[Bot] 動作モード: ${BOT_MODE}`);
+  startScheduler();
+  if (BOT_MODE !== "vc") {
+    console.log("[Bot] 定時スケジューラー起動");
+  }
+});
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+  if (!targetChannelIds.has(message.channelId)) return;
+
+  const userId = message.author.id;
+  const userTag = message.author.tag;
+  const content = message.content.trim();
+
+  if (!content) return;
+
+  // ─── モードによる振り分け ─────────────────────────────────────────────
+  const isVCCommand =
+    content === "!kanshi" ||
+    content.startsWith("!kanshi ") ||
+    content === "!hakase" ||
+    content.startsWith("!hakase ") ||
+    content === "!owari";
+
+  if (BOT_MODE === "text" && isVCCommand) {
+    // テキストモード：VCコマンドは完全無視（自宅PCが処理する）
+    return;
+  }
+  if (BOT_MODE === "vc" && !isVCCommand) {
+    // VCモード：VC以外のコマンドはすべて無視
+    return;
+  }
+
+  // ─── !kanshi コマンド（VC参加）─────────────────────────────
+  if (content === "!kanshi" || content.startsWith("!kanshi ")) {
+    if (vcHandler.isConnected()) {
+      await message.reply("……既にVCに入っている。二重に参加する必要はない。");
+      return;
+    }
+
+    const arg = content.slice("!kanshi".length).trim();
+    let targetVC = null;
+
+    if (arg) {
+      const voiceChannels = message.guild.channels.cache.filter(
+        (ch) => ch.isVoiceBased()
+      );
+      targetVC =
+        voiceChannels.get(arg) ??
+        voiceChannels.find((ch) => ch.name === arg) ??
+        voiceChannels.find((ch) =>
+          ch.name.toLowerCase().includes(arg.toLowerCase())
+        ) ??
+        null;
+
+      if (!targetVC) {
+        const vcList = voiceChannels.map((ch) => `・${ch.name} (${ch.id})`).join("\n");
+        await message.reply(
+          `……「${arg}」というVCが見つからない。\n以下から正確に指定しろ。\n${vcList}`
+        );
+        return;
+      }
+    } else {
+      const member =
+        message.guild.members.cache.get(userId) ??
+        await message.guild.members.fetch(userId).catch(() => null);
+      targetVC = member?.voice?.channel ?? null;
+
+      if (!targetVC) {
+        const voiceChannels = message.guild.channels.cache.filter((ch) => ch.isVoiceBased());
+        const vcList = voiceChannels.map((ch) => `・${ch.name}`).join("\n");
+        await message.reply(
+          "……VCに入っていないな。\n`!kanshi [チャンネル名]` で指定するか、VCに入ってから実行しろ。\n\n" +
+          `利用可能なVC：\n${vcList}`
+        );
+        return;
+      }
+    }
+
+    if (!vcHandler.vcAvailable) {
+      await message.reply("……VC参加には `@discordjs/voice` が必要だ。`npm install @discordjs/voice ffmpeg-static opusscript` を実行してから再起動しろ。");
+      return;
+    }
+
+    const joined = await vcHandler.join(targetVC);
+    if (joined) {
+      await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。\n\`!hakase [メッセージ]\` で私に声を出させろ。終わるなら \`!owari\` だ。`);
+      console.log(`[Bot] VC参加完了 [${userTag}] → ${targetVC.name}`);
+    } else {
+      await message.reply("……VC参加に失敗した。権限を確認しろ。");
+    }
+    return;
+  }
+
+  // ─── !hakase コマンド（VCへの音声応答）──────────────────────
+  if (content.startsWith("!hakase ") || content === "!hakase") {
+    const userText = content.slice("!hakase".length).trim();
+
+    if (!vcHandler.isConnected()) {
+      await message.reply("……VCに入っていない。まず `!kanshi` を実行しろ。");
+      return;
+    }
+    if (!userText) {
+      await message.reply("……何か言え。 `!hakase [メッセージ]` の形式で使え。");
+      return;
+    }
+
+    console.log(`[Bot] !hakase受信 [${userTag}]: ${userText.slice(0, 80)}`);
+
+    if (config.ai.typingIndicator) {
+      await message.channel.sendTyping();
+    }
+
+    const sound = await vcHandler.respondToMessage(userText);
+    if (sound) {
+      await message.reply(`……${sound.name}。`);
+    } else {
+      await message.reply("……もう音は残っていない。全て使い切った。");
+    }
+    return;
+  }
+
+  // ─── コマンド処理 ────────────────────────────────────────────
+  switch (content) {
+    case "!owari": {
+      if (!vcHandler.isConnected()) {
+        await message.reply("……VCには入っていない。");
+        return;
+      }
+      vcHandler.leave();
+      await message.reply("……退出する。観察記録は保存した。");
+      console.log(`[Bot] VC退出 [${userTag}]`);
+      return;
+    }
+
+    case "!reset":
+      aiHandler.clearHistory(userId);
+      await message.reply("気が変わった。記憶操作の薬だ、飲め。今すぐ");
+      console.log(`[Bot] 履歴リセット: ${userTag}`);
+      return;
+
+    case "!resetall":
+      aiHandler.clearAllHistory();
+      await message.reply("……全員分だ。記憶操作の薬を投与した。逆らうな。");
+      console.log(`[Bot] 全履歴リセット: ${userTag}`);
+      return;
+
+    case "!okusuri": {
+      const t = pick("okusuri");
+      if (t) await message.reply(t);
+      console.log(`[Bot] おくすり投与 [${userTag}]`);
+      return;
+    }
+
+    case "!sleep": {
+      const t = pick("sleep");
+      if (t) await message.reply(t);
+      console.log(`[Bot] 睡眠管理 [${userTag}]`);
+      return;
+    }
+
+    case "!pain": {
+      const t = pick("pain");
+      if (t) await message.reply(t);
+      console.log(`[Bot] 痛み・不調 [${userTag}]`);
+      return;
+    }
+
+    case "!work": {
+      const t = pick("work");
+      if (t) await message.reply(t);
+      console.log(`[Bot] 作業開始 [${userTag}]`);
+      return;
+    }
+
+    case "!observe": {
+      const t = pick("observe");
+      if (t) await message.reply(t);
+      console.log(`[Bot] 観察要求 [${userTag}]`);
+      return;
+    }
+
+    case "!reward": {
+      const t = pick("reward");
+      if (t) await message.reply(t);
+      console.log(`[Bot] 褒め [${userTag}]`);
+      return;
+    }
+
+    case "!reload": {
+      const ok = loadMessages();
+      if (ok) {
+        const summary = Object.entries(messageLists)
+          .map(([k, v]) => `${k}: ${v.length}件`)
+          .join("\n");
+        const scheduleSummary = Object.entries(scheduleMap)
+          .sort((a, b) => a[0] - b[0])
+          .map(([h, l]) => `${h}時 → ${l}`)
+          .join(" / ");
+        await message.reply(
+          `……再読み込み完了。\n\n【リスト】\n${summary}\n\n【スケジュール】\n${scheduleSummary}`
+        );
+      } else {
+        await message.reply("……読み込みに失敗した。messages.json の構文を確認しろ。");
+      }
+      console.log(`[Bot] messages.json リロード [${userTag}]`);
+      return;
+    }
+
+    case "!help":
+      await message.reply(
+        "【コマンド一覧】\n" +
+        "!reset         … 自分の会話履歴をリセット\n" +
+        "!resetall      … 全ユーザーの会話履歴をリセット\n" +
+        "!okusuri       … 薬を投与してもらう\n" +
+        "!sleep         … 就寝前、管理下で休む\n" +
+        "!pain          … 痛み・不調を報告する\n" +
+        "!work          … 作業・勉強を開始する\n" +
+        "!observe       … 観察してほしいとき\n" +
+        "!reward        … 成功・達成を報告する\n" +
+        "!kanshi [VC名] … ドットーレをVCに召喚（引数なしで自分のVCに参加）\n" +
+        "!hakase [msg]  … VCでドットーレに反応させる（AI選択で音声再生）\n" +
+        "!owari         … ドットーレをVCから退出させる\n" +
+        "!reload        … messages.json を再読み込み（再起動不要）\n" +
+        "!help          … このヘルプを表示\n\n" +
+        "それ以外のメッセージはドットーレが回答します。"
+      );
+      return;
+  }
+
+  // ─── AI 応答 ─────────────────────────────────────────────────
+  console.log(`[Bot] メッセージ受信 [${userTag}]: ${content.slice(0, 80)}`);
+
+  if (config.ai.typingIndicator) {
+    await message.channel.sendTyping();
+  }
+
+  try {
+    const reply = await aiHandler.generateResponse(userId, content);
+    if (reply.length <= 2000) {
+      await message.reply(reply);
+    } else {
+      const chunks = splitMessage(reply, 2000);
+      for (const chunk of chunks) {
+        await message.channel.send(chunk);
+      }
+    }
+    console.log(`[Bot] 返答送信完了 [${userTag}]`);
+  } catch (error) {
+    console.error(`[Bot] エラー [${userTag}]:`, error.message);
+    await message.reply(config.ai.errorMessage);
+  }
+});
+
+client.login(config.discord.token).catch((err) => {
+  console.error("[Bot] ログインに失敗しました:", err.message);
+  process.exit(1);
+});
