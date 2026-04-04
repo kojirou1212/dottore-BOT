@@ -16,64 +16,78 @@ try {
 
 // ── サウンドボード定義 ────────────────────────────────────────────────────
 const SOUND_BOARD = [
-  { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",                tags: ["否定", "反論", "ありえない", "驚き"] },
-  { name: "おっと、すまない",         file: "おっと、すまない.mp3",                tags: ["謝罪", "失礼", "すまない", "軽い謝り"] },
-  { name: "やられ",                   file: "ぐあああああッ！！！(やられ).mp3",    tags: ["やられ", "敗北", "ダメージ", "絶叫"] },
-  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおおっ…！！(被ダメ２).mp3",  tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
-  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおっ！！(被ダメ１).mp3",         tags: ["叫び", "ダメージ", "衝撃"] },
-  { name: "ごきげんよう",             file: "ごきげんよう。.mp3",                  tags: ["挨拶", "上機嫌", "余裕", "去り際"] },
-  { name: "さようならと言わなくては", file: "さようならと言わなくては.mp3",        tags: ["別れ", "去り際", "皮肉", "余裕"] },
-  { name: "耐える声",                 file: "ぬあああああああっ…！！(耐え).mp3",   tags: ["耐える", "苦しい", "我慢", "痛み"] },
-  { name: "溜息",                     file: "はぁ…(溜息).mp3",                    tags: ["ため息", "呆れ", "疲れ", "落胆"] },
-  { name: "笑い声1",                  file: "はっはっはっは….mp3",                tags: ["笑", "高笑い", "嘲笑", "面白い"] },
-  { name: "笑い声2",                  file: "ははは….mp3",                        tags: ["笑", "面白い", "可笑しい"] },
-  { name: "笑い声3",                  file: "ふふ….mp3",                          tags: ["笑", "含み笑い", "余裕", "皮肉"] },
-  { name: "ふ…",                     file: "ふ….mp3",                            tags: ["呆れ", "鼻で笑う", "軽蔑", "余裕"] },
-  { name: "ふん",                     file: "ふん.mp3",                           tags: ["呆れ", "無視", "ため息", "興味なし"] },
-  { name: "ほう？",                   file: "ほう？.mp3",                         tags: ["興味", "驚き", "なるほど", "反応"] },
-  { name: "ん？",                     file: "ん？.mp3",                           tags: ["疑問", "聞き返し", "確認", "怪訝"] },
-  { name: "絶対に後悔するよ！",       file: "絶対に後悔するよ！.mp3",             tags: ["脅し", "警告", "怒り", "後悔"] },
-  { name: "動くな。",                 file: "動くな。.mp3",                       tags: ["制止", "命令", "威圧", "止まれ"] },
+  { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",               tags: ["否定", "反論", "ありえない", "驚き"] },
+  { name: "おっと、すまない",         file: "おっと、すまない.mp3",               tags: ["謝罪", "失礼", "すまない", "軽い謝り"] },
+  { name: "やられ",                   file: "ぐあああああッ！！！(やられ).mp3",   tags: ["やられ", "敗北", "ダメージ", "絶叫"] },
+  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおおっ…！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
+  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおっ！！(被ダメ１).mp3",        tags: ["叫び", "ダメージ", "衝撃"] },
+  { name: "ごきげんよう",             file: "ごきげんよう。.mp3",                 tags: ["挨拶", "上機嫌", "余裕", "去り際"] },
+  { name: "さようならと言わなくては", file: "さようならと言わなくては.mp3",       tags: ["別れ", "去り際", "皮肉", "余裕"] },
+  { name: "耐える声",                 file: "ぬあああああああっ…！！(耐え).mp3",  tags: ["耐える", "苦しい", "我慢", "痛み"] },
+  { name: "溜息",                     file: "はぁ…(溜息).mp3",                   tags: ["ため息", "呆れ", "疲れ", "落胆"] },
+  { name: "笑い声1",                  file: "はっはっはっは….mp3",               tags: ["笑", "高笑い", "嘲笑", "面白い"] },
+  { name: "笑い声2",                  file: "ははは….mp3",                       tags: ["笑", "面白い", "可笑しい"] },
+  { name: "笑い声3",                  file: "ふふ….mp3",                         tags: ["笑", "含み笑い", "余裕", "皮肉"] },
+  { name: "ふ…",                     file: "ふ….mp3",                           tags: ["呆れ", "鼻で笑う", "軽蔑", "余裕"] },
+  { name: "ふん",                     file: "ふん.mp3",                          tags: ["呆れ", "無視", "ため息", "興味なし"] },
+  { name: "ほう？",                   file: "ほう？.mp3",                        tags: ["興味", "驚き", "なるほど", "反応"] },
+  { name: "ん？",                     file: "ん？.mp3",                          tags: ["疑問", "聞き返し", "確認", "怪訝"] },
+  { name: "絶対に後悔するよ！",       file: "絶対に後悔するよ！.mp3",            tags: ["脅し", "警告", "怒り", "後悔"] },
+  { name: "動くな。",                 file: "動くな。.mp3",                      tags: ["制止", "命令", "威圧", "止まれ"] },
 ];
 
-// ── 起動時：soundsフォルダとSOUND_BOARDの一致確認 ─────────────────────────
+// ── ファイル名のファジー正規化 ────────────────────────────────────────────
+// っ/ッ・全角/半角括弧・.../ … の差異を吸収する
+function fuzzyNormalize(filename) {
+  return filename
+    .normalize("NFC")
+    .replace(/っ/g, "ッ")           // ひらがな小文字 → カタカナ
+    .replace(/\.\.\./g, "…")       // 3点リーダー → 省略記号
+    .replace(/\(/g, "（")           // 半角 ( → 全角
+    .replace(/\)/g, "）");          // 半角 ) → 全角
+}
+
+// ── 実ファイルとのマッチング ─────────────────────────────────────────────
+// 対象ファイル名に最もよく一致する実ファイル名を返す
+// 1. 完全一致（NFC）
+// 2. ファジー正規化後に一致
+// 3. 見つからなければ null
+function findActualFile(targetFileName, actualFiles) {
+  const targetNFC = targetFileName.normalize("NFC");
+  const exact = actualFiles.find((f) => f.normalize("NFC") === targetNFC);
+  if (exact) return exact;
+
+  const targetFuzzy = fuzzyNormalize(targetFileName);
+  const fuzzy = actualFiles.find((f) => fuzzyNormalize(f) === targetFuzzy);
+  return fuzzy ?? null;
+}
+
+// ── 起動時ファイル確認 ────────────────────────────────────────────────────
 function checkSoundFiles() {
   const soundsDir = path.join(__dirname, "sounds");
-
   if (!fs.existsSync(soundsDir)) {
     console.warn("[VCHandler] sounds/ フォルダが存在しません。");
     return;
   }
 
   const actualFiles = fs.readdirSync(soundsDir);
-  const actualNFC = actualFiles.map((f) => f.normalize("NFC"));
-
   let okCount = 0;
   let ngCount = 0;
 
   for (const entry of SOUND_BOARD) {
-    const normalized = entry.file.normalize("NFC");
-    if (actualNFC.includes(normalized)) {
+    const matched = findActualFile(entry.file, actualFiles);
+    if (matched) {
+      if (matched !== entry.file) {
+        console.log(`[VCHandler] ファジーマッチ: "${entry.file}" → "${matched}"`);
+      }
       okCount++;
     } else {
-      // NG の場合は実ファイルの hex も出力して原因を特定する
-      const hex = Buffer.from(entry.file, "utf8").toString("hex");
-      console.warn(`[VCHandler] NG: "${entry.file}" (hex: ${hex.slice(0, 40)}...)`);
-      // 実ファイルで似ているものを探す
-      const similar = actualFiles.find((f) => f.includes(entry.name.slice(0, 2)));
-      if (similar) {
-        const simHex = Buffer.from(similar, "utf8").toString("hex");
-        console.warn(`  → 実ファイル候補: "${similar}" (hex: ${simHex.slice(0, 40)}...)`);
-      }
+      console.warn(`[VCHandler] NG (マッチなし): "${entry.file}"`);
       ngCount++;
     }
   }
 
   console.log(`[VCHandler] ファイル確認: ${okCount}件OK / ${ngCount}件NG`);
-  if (ngCount > 0) {
-    console.log("[VCHandler] sounds/ 実ファイル一覧:");
-    actualFiles.forEach((f) => console.log(`  "${f}"`));
-  }
 }
 
 checkSoundFiles();
@@ -195,7 +209,6 @@ ${soundList}
       console.log(`[VCHandler] AI生応答: "${raw}"`);
 
       const index = parseInt(raw, 10);
-
       if (!isNaN(index) && index >= 0 && index < available.length) {
         const chosen = available[index];
         this.usedSounds.add(chosen.file);
@@ -217,7 +230,7 @@ ${soundList}
     return chosen;
   }
 
-  // ── 音声ファイルの再生（NFC正規化でファイル名照合）──────────────────────
+  // ── 音声ファイルの再生（ファジーマッチング対応）──────────────────────────
   async playSound(soundEntry) {
     if (!this.vcAvailable || !this.player) {
       console.warn("[VCHandler] 音声再生不可（@discordjs/voice 未インストール）");
@@ -229,12 +242,11 @@ ${soundList}
     }
 
     const soundsDir = path.join(__dirname, "sounds");
-    const targetNFC = soundEntry.file.normalize("NFC");
     const actualFiles = fs.readdirSync(soundsDir);
-    const matched = actualFiles.find((f) => f.normalize("NFC") === targetNFC);
+    const matched = findActualFile(soundEntry.file, actualFiles);
 
     if (!matched) {
-      console.warn(`[VCHandler] 音声ファイルが見つかりません（スキップ）: ${soundEntry.file}`);
+      console.warn(`[VCHandler] 音声ファイルが見つかりません: ${soundEntry.file}`);
       return false;
     }
 
