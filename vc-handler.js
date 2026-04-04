@@ -6,8 +6,6 @@ const path = require("path");
 const fs = require("fs");
 
 // ── @discordjs/voice の遅延ロード ─────────────────────────────────────────
-// パッケージが未インストールでも bot 起動時にクラッシュしないよう
-// require を関数内で行い、失敗した場合は VC 機能全体を無効化する
 let voiceLib = null;
 try {
   voiceLib = require("@discordjs/voice");
@@ -18,26 +16,25 @@ try {
 }
 
 // ── サウンドボード定義 ────────────────────────────────────────────────────
-// 2枚目の画像のサウンドボード一覧に対応するファイル名を定義
-// sounds/ ディレクトリに同名の音声ファイル（mp3 or ogg）を置くこと
 const SOUND_BOARD = [
-  { name: "3秒数えてくれるドットーレ", file: "3seconds.mp3",  tags: ["カウント", "数える", "待て", "3秒"] },
-  { name: "ふん...",                   file: "fun.mp3",       tags: ["呆れ", "無視", "ため息", "興味なし"] },
-  { name: "笑い声1",                   file: "laugh1.mp3",    tags: ["笑", "面白", "可笑しい", "嬉しい"] },
-  { name: "笑い声2",                   file: "laugh2.mp3",    tags: ["笑", "面白", "可笑しい"] },
-  { name: "笑い声3",                   file: "laugh3.mp3",    tags: ["笑", "高笑い", "嘲笑"] },
-  { name: "笑い声4",                   file: "laugh4.mp3",    tags: ["笑", "低い笑い"] },
-  { name: "絶対に後悔するよ！",         file: "regret.mp3",   tags: ["脅し", "警告", "怒り", "後悔"] },
-  { name: "溜息",                      file: "sigh.mp3",      tags: ["ため息", "呆れ", "疲れ", "落胆"] },
-  { name: "ぐはっ",                    file: "guha.mp3",      tags: ["ダメージ", "驚き", "衝撃", "痛み"] },
-  { name: "ぐわーっ！1",               file: "guwa1.mp3",     tags: ["叫び", "驚愕", "怒り", "絶叫"] },
-  { name: "ぐわーっ！2",               file: "guwa2.mp3",     tags: ["叫び", "驚愕", "怒り"] },
-  { name: "耐える声",                  file: "endure.mp3",    tags: ["耐える", "苦しい", "我慢", "痛み"] },
-  { name: "やられ",                    file: "yarareru.mp3",  tags: ["やられ", "敗北", "ダメージ", "倒れる"] },
-  { name: "相槌1",                     file: "aizuchi1.mp3",  tags: ["相槌", "了解", "ふむ", "なるほど"] },
-  { name: "相槌2",                     file: "aizuchi2.mp3",  tags: ["相槌", "了解", "ふむ"] },
-  { name: "謝罪",                      file: "apology.mp3",   tags: ["謝り", "すまない", "失礼", "申し訳"] },
-  { name: "反語構文",                  file: "hango.mp3",     tags: ["反論", "皮肉", "逆説", "そんなわけない"] },
+  { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",               tags: ["否定", "反論", "ありえない", "驚き"] },
+  { name: "おっと、すまない",         file: "おっと、すまない.mp3",               tags: ["謝罪", "失礼", "すまない", "軽い謝り"] },
+  { name: "やられ",                   file: "ぐあああああっ！！！(やられ).mp3",   tags: ["やられ", "敗北", "ダメージ", "絶叫"] },
+  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおっ...！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
+  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおっ！！(被ダメ１).mp3",        tags: ["叫び", "ダメージ", "衝撃"] },
+  { name: "ごきげんよう",             file: "ごきげんよう。.mp3",                 tags: ["挨拶", "上機嫌", "余裕", "去り際"] },
+  { name: "さようならと言わなくては", file: "さようならと言わなくては.mp3",       tags: ["別れ", "去り際", "皮肉", "余裕"] },
+  { name: "耐える声",                 file: "ぬあああああああっ...！！(耐え).mp3", tags: ["耐える", "苦しい", "我慢", "痛み"] },
+  { name: "溜息",                     file: "はぁ...(溜息).mp3",                  tags: ["ため息", "呆れ", "疲れ", "落胆"] },
+  { name: "笑い声1",                  file: "はっはっはっは....mp3",              tags: ["笑", "高笑い", "嘲笑", "面白い"] },
+  { name: "笑い声2",                  file: "ははは....mp3",                      tags: ["笑", "面白い", "可笑しい"] },
+  { name: "笑い声3",                  file: "ふふ....mp3",                        tags: ["笑", "含み笑い", "余裕", "皮肉"] },
+  { name: "ふ...",                    file: "ふ....mp3",                          tags: ["呆れ", "鼻で笑う", "軽蔑", "余裕"] },
+  { name: "ふん...",                  file: "ふん.mp3",                           tags: ["呆れ", "無視", "ため息", "興味なし"] },
+  { name: "ほう？",                   file: "ほう？.mp3",                         tags: ["興味", "驚き", "なるほど", "反応"] },
+  { name: "ん？",                     file: "ん？.mp3",                           tags: ["疑問", "聞き返し", "確認", "怪訝"] },
+  { name: "絶対に後悔するよ！",       file: "絶対に後悔するよ！.mp3",             tags: ["脅し", "警告", "怒り", "後悔"] },
+  { name: "動くな。",                 file: "動くな。.mp3",                       tags: ["制止", "命令", "威圧", "止まれ"] },
 ];
 
 class VCHandler {
@@ -48,8 +45,8 @@ class VCHandler {
     this.isPlaying = false;
     this.usedSounds = new Set();
     this.ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    this.vcAvailable = voiceLib !== null; // VC参加・退出が可能か
-    this.playAvailable = false;           // 音声再生が可能か（ファイルが揃ってから true になる）
+    this.vcAvailable = voiceLib !== null;
+    this.playAvailable = false;
 
     if (this.vcAvailable) {
       const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
@@ -112,7 +109,6 @@ class VCHandler {
 
   // ── AIによる音声選択 ─────────────────────────────────────────────────────
   async selectSound(userMessage) {
-    // 未使用の音声のみを候補にする
     const available = SOUND_BOARD.filter((s) => !this.usedSounds.has(s.file));
     if (available.length === 0) {
       console.log("[VCHandler] 全音声使用済み");
@@ -142,7 +138,11 @@ ${soundList}
         config: { maxOutputTokens: 10 },
       });
 
-      const raw = response.text?.trim?.() ?? String(response.text).trim();
+      // response.text は関数の場合と文字列の場合がある
+      const rawText = typeof response.text === "function"
+        ? response.text()
+        : response.text;
+      const raw = (rawText ?? "").toString().trim();
       const index = parseInt(raw, 10);
 
       if (!isNaN(index) && index >= 0 && index < available.length) {
@@ -152,7 +152,6 @@ ${soundList}
         return chosen;
       }
 
-      // パース失敗時はランダムフォールバック
       console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
       return this._randomFallback(available);
     } catch (err) {
