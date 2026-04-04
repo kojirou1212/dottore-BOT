@@ -36,6 +36,47 @@ const SOUND_BOARD = [
   { name: "動くな。",                 file: "動くな。.mp3",                       tags: ["制止", "命令", "威圧", "止まれ"] },
 ];
 
+// ── 起動時：soundsフォルダとSOUND_BOARDの一致確認 ─────────────────────────
+function checkSoundFiles() {
+  const soundsDir = path.join(__dirname, "sounds");
+
+  if (!fs.existsSync(soundsDir)) {
+    console.warn("[VCHandler] sounds/ フォルダが存在しません。作成してください。");
+    return;
+  }
+
+  // 実際のファイル一覧を取得（NFC正規化）
+  const actualFiles = fs.readdirSync(soundsDir).map((f) => f.normalize("NFC"));
+
+  let okCount = 0;
+  let ngCount = 0;
+
+  for (const entry of SOUND_BOARD) {
+    const normalized = entry.file.normalize("NFC");
+    if (actualFiles.includes(normalized)) {
+      okCount++;
+    } else {
+      console.warn(`[VCHandler] ファイル不一致: "${entry.file}"`);
+      // 似たファイル名があれば候補を表示
+      const similar = actualFiles.find((f) =>
+        f.includes(entry.name.slice(0, 3))
+      );
+      if (similar) console.warn(`  → 候補: "${similar}"`);
+      ngCount++;
+    }
+  }
+
+  console.log(`[VCHandler] ファイル確認完了: ${okCount}件OK / ${ngCount}件NG`);
+
+  // 実ファイルの一覧も出力（ファイル名確認用）
+  if (ngCount > 0) {
+    console.log("[VCHandler] sounds/ 内の実ファイル一覧:");
+    actualFiles.forEach((f) => console.log(`  "${f}"`));
+  }
+}
+
+checkSoundFiles();
+
 class VCHandler {
   constructor(config) {
     this.config = config;
@@ -44,7 +85,6 @@ class VCHandler {
     this.isPlaying = false;
     this.usedSounds = new Set();
     this.vcAvailable = voiceLib !== null;
-    this.playAvailable = false;
 
     if (this.vcAvailable) {
       const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
@@ -144,6 +184,13 @@ ${soundList}
       });
 
       const data = await res.json();
+
+      // エラーレスポンスの確認
+      if (data.error) {
+        console.error(`[VCHandler] API エラー: ${data.error.code} ${data.error.message}`);
+        return this._randomFallback(available);
+      }
+
       const raw = (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
       console.log(`[VCHandler] AI生応答: "${raw}"`);
 
@@ -170,7 +217,7 @@ ${soundList}
     return chosen;
   }
 
-  // ── 音声ファイルの再生 ────────────────────────────────────────────────────
+  // ── 音声ファイルの再生（NFC正規化でファイル名を比較）─────────────────────
   async playSound(soundEntry) {
     if (!this.vcAvailable || !this.player) {
       console.warn("[VCHandler] 音声再生不可（@discordjs/voice 未インストール）");
@@ -182,12 +229,18 @@ ${soundList}
     }
 
     const soundsDir = path.join(__dirname, "sounds");
-    const filePath = path.join(soundsDir, soundEntry.file);
 
-    if (!fs.existsSync(filePath)) {
+    // NFC正規化したファイル名で実ファイルを探す
+    const targetName = soundEntry.file.normalize("NFC");
+    const actualFiles = fs.readdirSync(soundsDir);
+    const matched = actualFiles.find((f) => f.normalize("NFC") === targetName);
+
+    if (!matched) {
       console.warn(`[VCHandler] 音声ファイルが見つかりません（スキップ）: ${soundEntry.file}`);
       return false;
     }
+
+    const filePath = path.join(soundsDir, matched);
 
     try {
       const { createAudioResource } = voiceLib;
