@@ -1,7 +1,6 @@
 // vc-handler.js
 // ボイスチャンネル接続・音声再生・AI音声選択ロジック
 
-const { GoogleGenAI } = require("@google/genai");
 const path = require("path");
 const fs = require("fs");
 
@@ -44,7 +43,6 @@ class VCHandler {
     this.player = null;
     this.isPlaying = false;
     this.usedSounds = new Set();
-    this.ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     this.vcAvailable = voiceLib !== null;
     this.playAvailable = false;
 
@@ -107,7 +105,7 @@ class VCHandler {
     return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
   }
 
-  // ── AIによる音声選択 ─────────────────────────────────────────────────────
+  // ── AIによる音声選択（REST API直接呼び出し）──────────────────────────────
   async selectSound(userMessage) {
     const available = SOUND_BOARD.filter((s) => !this.usedSounds.has(s.file));
     if (available.length === 0) {
@@ -132,21 +130,24 @@ ${soundList}
 他の文字は一切含めないでください。数字のみです。`;
 
     try {
-      // ai-handler.js と同じ chat.sendMessage 方式を使用
-      const chat = this.ai.chats.create({
-        model: this.config.gemini.model,
-        config: { maxOutputTokens: 10 },
+      const apiKey = this.config.gemini.apiKey;
+      const model = this.config.gemini.model;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 10 },
+        }),
       });
 
-      const response = await chat.sendMessage({ message: prompt });
+      const data = await res.json();
+      const raw = (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
+      console.log(`[VCHandler] AI生応答: "${raw}"`);
 
-      const raw = typeof response.text === "function"
-        ? (response.text() ?? "")
-        : (response.text ?? "");
-      const trimmed = raw.toString().trim();
-      console.log(`[VCHandler] AI生応答: "${trimmed}"`);
-
-      const index = parseInt(trimmed, 10);
+      const index = parseInt(raw, 10);
 
       if (!isNaN(index) && index >= 0 && index < available.length) {
         const chosen = available[index];
@@ -155,7 +156,7 @@ ${soundList}
         return chosen;
       }
 
-      console.warn(`[VCHandler] AI応答パース失敗: "${trimmed}" → ランダム選択`);
+      console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
       return this._randomFallback(available);
     } catch (err) {
       console.error("[VCHandler] AI音声選択エラー:", err.message);
