@@ -138,11 +138,18 @@ ${soundList}
         config: { maxOutputTokens: 10 },
       });
 
-      // response.text は関数の場合と文字列の場合がある
-      const rawText = typeof response.text === "function"
-        ? response.text()
-        : response.text;
-      const raw = (rawText ?? "").toString().trim();
+      // response.text の取得（関数・文字列・candidates の3段階でフォールバック）
+      let raw = "";
+      if (typeof response.text === "function") {
+        raw = response.text() ?? "";
+      } else if (typeof response.text === "string") {
+        raw = response.text;
+      } else {
+        raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      }
+      raw = raw.toString().trim();
+      console.log(`[VCHandler] AI生応答: "${raw}"`);
+
       const index = parseInt(raw, 10);
 
       if (!isNaN(index) && index >= 0 && index < available.length) {
