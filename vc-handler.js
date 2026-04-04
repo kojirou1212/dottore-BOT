@@ -36,25 +36,40 @@ const SOUND_BOARD = [
   { name: "動くな。",                 file: "動くな。.mp3",                      tags: ["制止", "命令", "威圧", "止まれ"] },
 ];
 
-// ── ファジー正規化 ─────────────────────────────────────────────────────────
+// ── ファジー正規化（Unicodeコードポイント指定で確実に変換）──────────────────
+// ひらがな全体をカタカナに変換 + 省略記号・括弧を統一
 function fuzzyNormalize(filename) {
-  return filename
-    .normalize("NFC")
-    .replace(/っ/g, "ッ")
-    .replace(/\.\.\./g, "…")
-    .replace(/\(/g, "（")
-    .replace(/\)/g, "）");
+  let s = filename.normalize("NFC");
+
+  // ひらがな（U+3041〜U+3096）→ 対応するカタカナ（+0x60）
+  s = s.replace(/[\u3041-\u3096]/g, (c) =>
+    String.fromCodePoint(c.codePointAt(0) + 0x60)
+  );
+
+  // ドット2個以上・省略記号 → U+2026（…）
+  s = s.replace(/\.{2,}|\u2026/g, "\u2026");
+
+  // 括弧を全角に統一
+  s = s.replace(/[(（\uff08]/g, "\uff08");  // ( （ → （
+  s = s.replace(/[)）\uff09]/g, "\uff09");  // ) ） → ）
+
+  return s;
 }
 
 function findActualFile(targetFileName, actualFiles) {
-  const exact = actualFiles.find((f) => f.normalize("NFC") === targetFileName.normalize("NFC"));
+  // 1. NFC完全一致
+  const exact = actualFiles.find(
+    (f) => f.normalize("NFC") === targetFileName.normalize("NFC")
+  );
   if (exact) return exact;
+
+  // 2. ファジー一致
   const targetFuzzy = fuzzyNormalize(targetFileName);
   const fuzzy = actualFiles.find((f) => fuzzyNormalize(f) === targetFuzzy);
   return fuzzy ?? null;
 }
 
-// ── 起動時ファイル確認（NGはhex出力）────────────────────────────────────────
+// ── 起動時ファイル確認 ────────────────────────────────────────────────────
 function checkSoundFiles() {
   const soundsDir = path.join(__dirname, "sounds");
   if (!fs.existsSync(soundsDir)) {
@@ -73,17 +88,19 @@ function checkSoundFiles() {
       }
       okCount++;
     } else {
-      const hex = Buffer.from(entry.file, "utf8").toString("hex");
       console.warn(`[VCHandler] NG: "${entry.file}"`);
-      console.warn(`  hex全体: ${hex}`);
-      // 実ファイルから先頭3文字が一致するものを候補として表示
-      const prefix = entry.file.normalize("NFC").slice(0, 3);
+      const targetFuzzy = fuzzyNormalize(entry.file);
+      console.warn(`  fuzzy後: "${targetFuzzy}"`);
+      console.warn(`  fuzzy hex: ${Buffer.from(targetFuzzy, "utf8").toString("hex")}`);
+      // 先頭1文字が一致する実ファイルの fuzzy結果も表示
+      const prefix = entry.file.normalize("NFC")[0];
       actualFiles
-        .filter((f) => f.normalize("NFC").startsWith(prefix))
+        .filter((f) => f.normalize("NFC")[0] === prefix)
+        .slice(0, 3)
         .forEach((f) => {
-          const fhex = Buffer.from(f, "utf8").toString("hex");
-          console.warn(`  実ファイル候補: "${f}"`);
-          console.warn(`  hex全体: ${fhex}`);
+          const ff = fuzzyNormalize(f);
+          console.warn(`  実ファイルfuzzy: "${ff}"`);
+          console.warn(`  実ファイルfuzzy hex: ${Buffer.from(ff, "utf8").toString("hex")}`);
         });
       ngCount++;
     }
@@ -194,30 +211,25 @@ ${soundList}
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 10 },
+          generationConfig: {
+            maxOutputTokens: 500,          // 思考トークン分を含めて余裕を持たせる
+            thinkingConfig: {
+              thinkingBudget: 0,           // gemini-2.5-flash の思考モードを無効化
+            },
+          },
         }),
       });
 
       const data = await res.json();
 
-      // APIエラー確認
       if (data.error) {
         console.error(`[VCHandler] API エラー: ${data.error.code} - ${data.error.message}`);
         return this._randomFallback(available);
       }
 
-      // レスポンス全体をログ出力（AI空応答のデバッグ用）
       const candidate = data.candidates?.[0];
-      console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"}`);
-      console.log(`[VCHandler] candidatesCount: ${data.candidates?.length ?? 0}`);
-      if (candidate?.content?.parts) {
-        console.log(`[VCHandler] parts:`, JSON.stringify(candidate.content.parts));
-      } else {
-        console.log(`[VCHandler] レスポンス全体:`, JSON.stringify(data).slice(0, 300));
-      }
-
       const raw = (candidate?.content?.parts?.[0]?.text ?? "").trim();
-      console.log(`[VCHandler] AI生応答: "${raw}"`);
+      console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"} / AI生応答: "${raw}"`);
 
       const index = parseInt(raw, 10);
       if (!isNaN(index) && index >= 0 && index < available.length) {
