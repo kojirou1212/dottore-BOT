@@ -105,6 +105,34 @@ class VCHandler {
     }
   }
 
+  // ── 外部切断の検知・自動クリーンアップ ──────────────────────────────────
+  // Discord側でBotをVCから切断した場合に connection を null にする
+  _setupConnectionListeners() {
+    if (!this.connection || !voiceLib) return;
+    const { VoiceConnectionStatus } = voiceLib;
+
+    this.connection.on("stateChange", (oldState, newState) => {
+      const oldStatus = oldState.status;
+      const newStatus = newState.status;
+
+      // Disconnected になったら破棄して null に
+      if (newStatus === VoiceConnectionStatus.Disconnected) {
+        console.log(`[VCHandler] 外部切断を検知 (${oldStatus} → ${newStatus})。接続をクリーンアップします。`);
+        try {
+          this.connection.destroy();
+        } catch (_) { /* すでに破棄済みの場合は無視 */ }
+        this.connection = null;
+        this.isPlaying = false;
+      }
+
+      // Destroyed になった場合も null に
+      if (newStatus === VoiceConnectionStatus.Destroyed) {
+        this.connection = null;
+        this.isPlaying = false;
+      }
+    });
+  }
+
   // ── VC への参加 ─────────────────────────────────────────────────────────
   async join(voiceChannel) {
     if (!this.vcAvailable) {
@@ -120,13 +148,17 @@ class VCHandler {
         selfDeaf: false,
         selfMute: false,
       });
+
+      // 外部切断を自動検知するリスナーを登録
+      this._setupConnectionListeners();
+
       await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
       if (this.player) this.connection.subscribe(this.player);
       console.log(`[VCHandler] VC参加完了: ${voiceChannel.name}`);
       return true;
     } catch (err) {
       console.error("[VCHandler] VC参加失敗:", err.message);
-      this.connection?.destroy();
+      try { this.connection?.destroy(); } catch (_) {}
       this.connection = null;
       return false;
     }
@@ -136,8 +168,9 @@ class VCHandler {
   leave() {
     if (this.connection) {
       this.player.stop();
-      this.connection.destroy();
+      try { this.connection.destroy(); } catch (_) {}
       this.connection = null;
+      this.isPlaying = false;
       console.log("[VCHandler] VC退出完了");
       return true;
     }
@@ -147,7 +180,10 @@ class VCHandler {
   isConnected() {
     if (!this.vcAvailable || !this.connection) return false;
     const { VoiceConnectionStatus } = voiceLib;
-    return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
+    return (
+      this.connection.state.status !== VoiceConnectionStatus.Destroyed &&
+      this.connection.state.status !== VoiceConnectionStatus.Disconnected
+    );
   }
 
   // ── AIによる音声選択（毎回全音声から選択）────────────────────────────────
@@ -212,8 +248,7 @@ ${soundList}
   }
 
   _randomFallback() {
-    const chosen = SOUND_BOARD[Math.floor(Math.random() * SOUND_BOARD.length)];
-    return chosen;
+    return SOUND_BOARD[Math.floor(Math.random() * SOUND_BOARD.length)];
   }
 
   // ── 音声ファイルの再生 ────────────────────────────────────────────────────
