@@ -50,10 +50,7 @@ if (!config.gemini.apiKey) {
 }
 
 // ─── 動作モード ────────────────────────────────────────────────────────────
-// BOT_MODE=text → テキスト専用（Railway/OCI）VCコマンドを無視
-// BOT_MODE=vc   → VC専用（自宅PC）VCコマンドのみ処理
-// 未設定        → 両方処理
-const BOT_MODE = process.env.BOT_MODE || "all";
+const BOT_MODE = (process.env.BOT_MODE || "all").trim();
 console.log(`[Bot] 動作モード: ${BOT_MODE}`);
 
 // ─── メッセージリストの読み込み ───────────────────────────────────────────
@@ -108,6 +105,9 @@ const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
 const targetChannelIds = new Set(config.discord.targetChannelIds);
 
+// 一人になったときの退出タイマー
+let aloneTimer = null;
+
 function pick(listName) {
   const list = messageLists[listName];
   if (!list || list.length === 0) return null;
@@ -124,7 +124,7 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
-// ─── 定時スケジューラー（テキストbot / allのみ）──────────────────────────
+// ─── 定時スケジューラー ───────────────────────────────────────────────────
 function startScheduler() {
   if (BOT_MODE === "vc") {
     console.log("[Bot] VCモード：スケジューラーは起動しません");
@@ -176,6 +176,52 @@ client.once("clientReady", () => {
   startScheduler();
 });
 
+// ─── VC人数監視：一人になったら5秒後に退出 ───────────────────────────────
+client.on("voiceStateUpdate", (oldState, newState) => {
+  if (!vcHandler.isConnected()) return;
+
+  // Botが参加しているチャンネルを取得
+  const botChannelId = oldState.guild.members.me?.voice?.channelId;
+  if (!botChannelId) return;
+
+  const channel = oldState.guild.channels.cache.get(botChannelId);
+  if (!channel) return;
+
+  // Bot以外のメンバー数をカウント
+  const humanCount = channel.members.filter((m) => !m.user.bot).size;
+
+  if (humanCount === 0) {
+    // 一人（Bot以外いない）→ 5秒後に退出
+    if (aloneTimer) return; // すでにタイマー起動中
+    console.log("[Bot] VC内が無人になりました。5秒後に退出します。");
+    aloneTimer = setTimeout(() => {
+      aloneTimer = null;
+      if (!vcHandler.isConnected()) return;
+      // 退出前に再確認
+      const ch = oldState.guild.channels.cache.get(botChannelId);
+      const stillAlone = ch?.members.filter((m) => !m.user.bot).size === 0;
+      if (stillAlone) {
+        vcHandler.leave();
+        console.log("[Bot] 無人のため自動退出しました。");
+        // テキストチャンネルに通知（最初の監視チャンネル）
+        const notifyChannelId = [...targetChannelIds][0];
+        if (notifyChannelId) {
+          client.channels.fetch(notifyChannelId)
+            .then((ch) => ch?.send("……観察終了、記録した。退出する。"))
+            .catch(() => {});
+        }
+      }
+    }, 5000);
+  } else {
+    // 誰かが入ってきた → タイマーキャンセル
+    if (aloneTimer) {
+      clearTimeout(aloneTimer);
+      aloneTimer = null;
+      console.log("[Bot] メンバーが戻ったため退出タイマーをキャンセルしました。");
+    }
+  }
+});
+
 // ─── メッセージ受信 ────────────────────────────────────────────────────────
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -186,7 +232,6 @@ client.on("messageCreate", async (message) => {
   const content = message.content.trim();
   if (!content) return;
 
-  // VCコマンド判定
   const isVCCommand =
     content === "!kanshi" ||
     content.startsWith("!kanshi ") ||
@@ -194,9 +239,8 @@ client.on("messageCreate", async (message) => {
     content.startsWith("!hakase ") ||
     content === "!owari";
 
-  // モードによる振り分け
-  if (BOT_MODE === "text" && isVCCommand) return;   // テキストbotはVCコマンドを無視
-  if (BOT_MODE === "vc" && !isVCCommand) return;    // VCbotはVC以外を無視
+  if (BOT_MODE === "text" && isVCCommand) return;
+  if (BOT_MODE === "vc" && !isVCCommand) return;
 
   // ── !kanshi ───────────────────────────────────────────────────
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
@@ -266,6 +310,7 @@ client.on("messageCreate", async (message) => {
   switch (content) {
     case "!owari":
       if (!vcHandler.isConnected()) { await message.reply("……VCには入っていない。"); return; }
+      if (aloneTimer) { clearTimeout(aloneTimer); aloneTimer = null; }
       vcHandler.leave();
       await message.reply("……退出する。観察記録は保存した。");
       return;
