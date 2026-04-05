@@ -136,11 +136,12 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
-// ─── 定時メッセージ（テキストモード or allのみ）──────────────────────────
+// ─── 定時メッセージ ───────────────────────────────────────────────────────
+// VCモードはスケジューラー自体を起動しないため、
+// clearAllHistory・定時メッセージどちらもVC botには影響しない
 
 function startScheduler() {
-  // VCモード専用の場合は定時メッセージ不要
-  if (BOT_MODE === "vc") return;
+  if (BOT_MODE === "vc") return; // VC botはここで終了
 
   let lastSentHour = -1;
 
@@ -155,6 +156,7 @@ function startScheduler() {
     if (lastSentHour === hour) return;
     lastSentHour = hour;
 
+    // 04:00 JST: 全会話履歴クリア → 再起動（テキストbotのみ）
     if (hour === 4) {
       console.log("[Scheduler] 定期再起動 (04:00 JST) を実行します...");
       try {
@@ -220,14 +222,8 @@ client.on("messageCreate", async (message) => {
     content.startsWith("!hakase ") ||
     content === "!owari";
 
-  if (BOT_MODE === "text" && isVCCommand) {
-    // テキストモード：VCコマンドは完全無視（自宅PCが処理する）
-    return;
-  }
-  if (BOT_MODE === "vc" && !isVCCommand) {
-    // VCモード：VC以外のコマンドはすべて無視
-    return;
-  }
+  if (BOT_MODE === "text" && isVCCommand) return;
+  if (BOT_MODE === "vc" && !isVCCommand) return;
 
   // ─── !kanshi コマンド（VC参加）─────────────────────────────
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
@@ -313,7 +309,7 @@ client.on("messageCreate", async (message) => {
     if (sound) {
       await message.reply(`……${sound.name}。`);
     } else {
-      await message.reply("……もう音は残っていない。全て使い切った。");
+      await message.reply("……今は声が出ない。");
     }
     return;
   }
