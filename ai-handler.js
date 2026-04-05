@@ -28,7 +28,6 @@ class AIHandler {
 
   // 履歴が user/model 交互・各エントリが有効かを検証・修復する
   sanitizeHistory(history) {
-    // parts が空または text が空文字のエントリを除去
     for (let i = history.length - 1; i >= 0; i--) {
       const entry = history[i];
       if (
@@ -41,11 +40,9 @@ class AIHandler {
         history.splice(i, 1);
       }
     }
-    // 先頭が model なら user が来るまで削除
     while (history.length > 0 && history[0].role !== "user") {
       history.shift();
     }
-    // user/model が交互になっているか確認し、連続している箇所は後ろを削除
     let i = 0;
     while (i < history.length - 1) {
       if (history[i].role === history[i + 1].role) {
@@ -74,7 +71,7 @@ class AIHandler {
 
         if (!isRetryable || attempt === maxRetries) break;
 
-        const waitMs = (2 ** attempt) * 1000 + Math.random() * 500; // 1s, 2s, 4s + jitter
+        const waitMs = (2 ** attempt) * 1000 + Math.random() * 500;
         console.warn(`[AIHandler] リトライ ${attempt + 1}/${maxRetries} (${Math.round(waitMs)}ms後): ${msg.slice(0, 80)}`);
         await new Promise((r) => setTimeout(r, waitMs));
       }
@@ -85,7 +82,6 @@ class AIHandler {
   async generateResponse(userId, userMessage) {
     const history = this.getHistory(userId);
 
-    // 末尾が user のまま残っていたら（前回エラー時の残骸）削除
     while (history.length > 0 && history[history.length - 1].role === "user") {
       history.pop();
     }
@@ -97,15 +93,12 @@ class AIHandler {
       history.shift();
     }
 
-    // API呼び出し前に履歴を必ず整合性チェック・修復
     this.sanitizeHistory(history);
 
-    // 現在の日時（日本時間）をシステムプロンプトに注入
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
     const systemPromptWithTime = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}`;
 
     try {
-      // 最後のuserメッセージはsendMessageで送るため historyからは除く
       const chatHistory = history.slice(0, -1);
 
       const assistantMessage = await this._callWithRetry(async () => {
@@ -114,19 +107,18 @@ class AIHandler {
           config: {
             systemInstruction: systemPromptWithTime,
             maxOutputTokens: this.config.gemini.maxTokens,
+            thinkingConfig: { thinkingBudget: 0 }, // 思考モード無効化
           },
           history: chatHistory,
         });
 
         const response = await chat.sendMessage({ message: userMessage });
 
-        // response.text は関数なので呼び出す
         const text = typeof response.text === "function"
           ? response.text()
           : response.text;
 
         if (!text || text.trim() === "") {
-          // 安全フィルター等によるブロックを確認
           const candidate = response.candidates?.[0];
           const finishReason = candidate?.finishReason ?? "UNKNOWN";
           console.warn(`[AIHandler] 空応答 finishReason=${finishReason}`);
@@ -147,7 +139,6 @@ class AIHandler {
       return assistantMessage;
 
     } catch (error) {
-      // 追加した user メッセージだけを取り消す
       if (history.length > 0 && history[history.length - 1].role === "user") {
         history.pop();
       }
