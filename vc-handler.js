@@ -19,8 +19,8 @@ const SOUND_BOARD = [
   { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",               tags: ["否定", "反論", "ありえない", "驚き"] },
   { name: "おっと、すまない",         file: "おっと、すまない.mp3",               tags: ["謝罪", "失礼", "すまない", "軽い謝り"] },
   { name: "やられ",                   file: "ぐあああああッ！！！(やられ).mp3",   tags: ["やられ", "敗北", "ダメージ", "絶叫"] },
-  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおおっ…！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
-  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおっ！！(被ダメ１).mp3",        tags: ["叫び", "ダメージ", "衝撃"] },
+  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおおッ…！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
+  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおっ！！(被ダメ１).mp3",      tags: ["叫び", "ダメージ", "衝撃"] },
   { name: "ごきげんよう",             file: "ごきげんよう。.mp3",                 tags: ["挨拶", "上機嫌", "余裕", "去り際"] },
   { name: "さようならと言わなくては", file: "さようならと言わなくては.mp3",       tags: ["別れ", "去り際", "皮肉", "余裕"] },
   { name: "耐える声",                 file: "ぬあああああああっ…！！(耐え).mp3",  tags: ["耐える", "苦しい", "我慢", "痛み"] },
@@ -36,34 +36,26 @@ const SOUND_BOARD = [
   { name: "動くな。",                 file: "動くな。.mp3",                      tags: ["制止", "命令", "威圧", "止まれ"] },
 ];
 
-// ── ファジー正規化（Unicodeコードポイント指定で確実に変換）──────────────────
-// ひらがな全体をカタカナに変換 + 省略記号・括弧を統一
+// ── ファジー正規化 ─────────────────────────────────────────────────────────
 function fuzzyNormalize(filename) {
   let s = filename.normalize("NFC");
-
-  // ひらがな（U+3041〜U+3096）→ 対応するカタカナ（+0x60）
+  // ひらがな → カタカナ
   s = s.replace(/[\u3041-\u3096]/g, (c) =>
     String.fromCodePoint(c.codePointAt(0) + 0x60)
   );
-
-  // ドット2個以上・省略記号 → U+2026（…）
+  // 省略記号統一
   s = s.replace(/\.{2,}|\u2026/g, "\u2026");
-
   // 括弧を全角に統一
-  s = s.replace(/[(（\uff08]/g, "\uff08");  // ( （ → （
-  s = s.replace(/[)）\uff09]/g, "\uff09");  // ) ） → ）
-
+  s = s.replace(/[(（\uff08]/g, "\uff08");
+  s = s.replace(/[)）\uff09]/g, "\uff09");
   return s;
 }
 
 function findActualFile(targetFileName, actualFiles) {
-  // 1. NFC完全一致
   const exact = actualFiles.find(
     (f) => f.normalize("NFC") === targetFileName.normalize("NFC")
   );
   if (exact) return exact;
-
-  // 2. ファジー一致
   const targetFuzzy = fuzzyNormalize(targetFileName);
   const fuzzy = actualFiles.find((f) => fuzzyNormalize(f) === targetFuzzy);
   return fuzzy ?? null;
@@ -88,20 +80,7 @@ function checkSoundFiles() {
       }
       okCount++;
     } else {
-      console.warn(`[VCHandler] NG: "${entry.file}"`);
-      const targetFuzzy = fuzzyNormalize(entry.file);
-      console.warn(`  fuzzy後: "${targetFuzzy}"`);
-      console.warn(`  fuzzy hex: ${Buffer.from(targetFuzzy, "utf8").toString("hex")}`);
-      // 先頭1文字が一致する実ファイルの fuzzy結果も表示
-      const prefix = entry.file.normalize("NFC")[0];
-      actualFiles
-        .filter((f) => f.normalize("NFC")[0] === prefix)
-        .slice(0, 3)
-        .forEach((f) => {
-          const ff = fuzzyNormalize(f);
-          console.warn(`  実ファイルfuzzy: "${ff}"`);
-          console.warn(`  実ファイルfuzzy hex: ${Buffer.from(ff, "utf8").toString("hex")}`);
-        });
+      console.warn(`[VCHandler] NG (マッチなし): "${entry.file}"`);
       ngCount++;
     }
   }
@@ -212,10 +191,8 @@ ${soundList}
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
-            maxOutputTokens: 500,          // 思考トークン分を含めて余裕を持たせる
-            thinkingConfig: {
-              thinkingBudget: 0,           // gemini-2.5-flash の思考モードを無効化
-            },
+            maxOutputTokens: 500,
+            thinkingConfig: { thinkingBudget: 0 },
           },
         }),
       });
@@ -254,13 +231,16 @@ ${soundList}
   }
 
   // ── 音声ファイルの再生 ────────────────────────────────────────────────────
+  // 再生失敗時は usedSounds から削除して次回も候補に残す
   async playSound(soundEntry) {
     if (!this.vcAvailable || !this.player) {
       console.warn("[VCHandler] 音声再生不可（@discordjs/voice 未インストール）");
+      this.usedSounds.delete(soundEntry.file);
       return false;
     }
     if (!this.isConnected()) {
       console.warn("[VCHandler] VC未接続のため再生スキップ");
+      this.usedSounds.delete(soundEntry.file);
       return false;
     }
 
@@ -270,6 +250,7 @@ ${soundList}
 
     if (!matched) {
       console.warn(`[VCHandler] 音声ファイルが見つかりません: ${soundEntry.file}`);
+      // 見つからないファイルは永続的に除外（無限ループ防止）
       return false;
     }
 
@@ -283,6 +264,7 @@ ${soundList}
       return true;
     } catch (err) {
       console.error("[VCHandler] 再生エラー:", err.message);
+      this.usedSounds.delete(soundEntry.file);
       return false;
     }
   }
