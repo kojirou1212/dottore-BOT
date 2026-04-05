@@ -19,8 +19,8 @@ const SOUND_BOARD = [
   { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",               tags: ["否定", "反論", "ありえない", "驚き"] },
   { name: "おっと、すまない",         file: "おっと、すまない.mp3",               tags: ["謝罪", "失礼", "すまない", "軽い謝り"] },
   { name: "やられ",                   file: "ぐあああああッ！！！(やられ).mp3",   tags: ["やられ", "敗北", "ダメージ", "絶叫"] },
-  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおおッ…！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
-  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおっ！！(被ダメ１).mp3",      tags: ["叫び", "ダメージ", "衝撃"] },
+  { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおおっ…！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
+  { name: "ぐおおっ（被ダメ１）",     file: "ぐおおおっ！！(被ダメ１).mp3",      tags: ["叫び", "ダメージ", "衝撃"] },
   { name: "ごきげんよう",             file: "ごきげんよう。.mp3",                 tags: ["挨拶", "上機嫌", "余裕", "去り際"] },
   { name: "さようならと言わなくては", file: "さようならと言わなくては.mp3",       tags: ["別れ", "去り際", "皮肉", "余裕"] },
   { name: "耐える声",                 file: "ぬあああああああっ…！！(耐え).mp3",  tags: ["耐える", "苦しい", "我慢", "痛み"] },
@@ -39,13 +39,10 @@ const SOUND_BOARD = [
 // ── ファジー正規化 ─────────────────────────────────────────────────────────
 function fuzzyNormalize(filename) {
   let s = filename.normalize("NFC");
-  // ひらがな → カタカナ
   s = s.replace(/[\u3041-\u3096]/g, (c) =>
     String.fromCodePoint(c.codePointAt(0) + 0x60)
   );
-  // 省略記号統一
   s = s.replace(/\.{2,}|\u2026/g, "\u2026");
-  // 括弧を全角に統一
   s = s.replace(/[(（\uff08]/g, "\uff08");
   s = s.replace(/[)）\uff09]/g, "\uff09");
   return s;
@@ -95,7 +92,6 @@ class VCHandler {
     this.connection = null;
     this.player = null;
     this.isPlaying = false;
-    this.usedSounds = new Set();
     this.vcAvailable = voiceLib !== null;
 
     if (this.vcAvailable) {
@@ -126,7 +122,6 @@ class VCHandler {
       });
       await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
       if (this.player) this.connection.subscribe(this.player);
-      this.usedSounds.clear();
       console.log(`[VCHandler] VC参加完了: ${voiceChannel.name}`);
       return true;
     } catch (err) {
@@ -143,7 +138,6 @@ class VCHandler {
       this.player.stop();
       this.connection.destroy();
       this.connection = null;
-      this.usedSounds.clear();
       console.log("[VCHandler] VC退出完了");
       return true;
     }
@@ -156,15 +150,9 @@ class VCHandler {
     return this.connection.state.status !== VoiceConnectionStatus.Destroyed;
   }
 
-  // ── AIによる音声選択 ──────────────────────────────────────────────────────
+  // ── AIによる音声選択（毎回全音声から選択）────────────────────────────────
   async selectSound(userMessage) {
-    const available = SOUND_BOARD.filter((s) => !this.usedSounds.has(s.file));
-    if (available.length === 0) {
-      console.log("[VCHandler] 全音声使用済み");
-      return null;
-    }
-
-    const soundList = available
+    const soundList = SOUND_BOARD
       .map((s, i) => `${i}: ${s.name} (タグ: ${s.tags.join(", ")})`)
       .join("\n");
 
@@ -201,7 +189,7 @@ ${soundList}
 
       if (data.error) {
         console.error(`[VCHandler] API エラー: ${data.error.code} - ${data.error.message}`);
-        return this._randomFallback(available);
+        return this._randomFallback();
       }
 
       const candidate = data.candidates?.[0];
@@ -209,38 +197,33 @@ ${soundList}
       console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"} / AI生応答: "${raw}"`);
 
       const index = parseInt(raw, 10);
-      if (!isNaN(index) && index >= 0 && index < available.length) {
-        const chosen = available[index];
-        this.usedSounds.add(chosen.file);
+      if (!isNaN(index) && index >= 0 && index < SOUND_BOARD.length) {
+        const chosen = SOUND_BOARD[index];
         console.log(`[VCHandler] AI選択音声: ${chosen.name} (index=${index})`);
         return chosen;
       }
 
       console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
-      return this._randomFallback(available);
+      return this._randomFallback();
     } catch (err) {
       console.error("[VCHandler] AI音声選択エラー:", err.message);
-      return this._randomFallback(available);
+      return this._randomFallback();
     }
   }
 
-  _randomFallback(available) {
-    const chosen = available[Math.floor(Math.random() * available.length)];
-    this.usedSounds.add(chosen.file);
+  _randomFallback() {
+    const chosen = SOUND_BOARD[Math.floor(Math.random() * SOUND_BOARD.length)];
     return chosen;
   }
 
   // ── 音声ファイルの再生 ────────────────────────────────────────────────────
-  // 再生失敗時は usedSounds から削除して次回も候補に残す
   async playSound(soundEntry) {
     if (!this.vcAvailable || !this.player) {
       console.warn("[VCHandler] 音声再生不可（@discordjs/voice 未インストール）");
-      this.usedSounds.delete(soundEntry.file);
       return false;
     }
     if (!this.isConnected()) {
       console.warn("[VCHandler] VC未接続のため再生スキップ");
-      this.usedSounds.delete(soundEntry.file);
       return false;
     }
 
@@ -250,7 +233,6 @@ ${soundList}
 
     if (!matched) {
       console.warn(`[VCHandler] 音声ファイルが見つかりません: ${soundEntry.file}`);
-      // 見つからないファイルは永続的に除外（無限ループ防止）
       return false;
     }
 
@@ -264,7 +246,6 @@ ${soundList}
       return true;
     } catch (err) {
       console.error("[VCHandler] 再生エラー:", err.message);
-      this.usedSounds.delete(soundEntry.file);
       return false;
     }
   }
