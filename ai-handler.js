@@ -98,42 +98,56 @@ class AIHandler {
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
     const systemPromptWithTime = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}`;
 
-    try {
-      const chatHistory = history.slice(0, -1);
+    const chatHistory = history.slice(0, -1);
 
-      const assistantMessage = await this._callWithRetry(async () => {
-        const chat = this.ai.chats.create({
-          model: this.config.gemini.model,
-          config: {
-            systemInstruction: systemPromptWithTime,
-            maxOutputTokens: this.config.gemini.maxTokens,
-            thinkingConfig: { thinkingBudget: 0 }, // 思考モード無効化
-          },
-          history: chatHistory,
-        });
-
-        const response = await chat.sendMessage({ message: userMessage });
-
-        const text = typeof response.text === "function"
-          ? response.text()
-          : response.text;
-
-        if (!text || text.trim() === "") {
-          const candidate = response.candidates?.[0];
-          const finishReason = candidate?.finishReason ?? "UNKNOWN";
-          console.warn(`[AIHandler] 空応答 finishReason=${finishReason}`);
-
-          if (finishReason === "SAFETY") {
-            return "……(その話題には応答できない)";
-          }
-          if (finishReason === "RECITATION") {
-            return "……(著作権の都合で応答できない)";
-          }
-          throw new Error(`AIからの応答が空でした。(finishReason=${finishReason})`);
-        }
-
-        return text;
+    const tryModel = async (model) => {
+      const chat = this.ai.chats.create({
+        model,
+        config: {
+          systemInstruction: systemPromptWithTime,
+          maxOutputTokens: this.config.gemini.maxTokens,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+        history: chatHistory,
       });
+
+      const response = await chat.sendMessage({ message: userMessage });
+
+      const text = typeof response.text === "function"
+        ? response.text()
+        : response.text;
+
+      if (!text || text.trim() === "") {
+        const candidate = response.candidates?.[0];
+        const finishReason = candidate?.finishReason ?? "UNKNOWN";
+        console.warn(`[AIHandler] 空応答 finishReason=${finishReason}`);
+
+        if (finishReason === "SAFETY") return "……(その話題には応答できない)";
+        if (finishReason === "RECITATION") return "……(著作権の都合で応答できない)";
+        throw new Error(`AIからの応答が空でした。(finishReason=${finishReason})`);
+      }
+
+      return text;
+    };
+
+    try {
+      const primaryModel = this.config.gemini.model;
+      let assistantMessage;
+
+      try {
+        assistantMessage = await this._callWithRetry(() => tryModel(primaryModel));
+      } catch (primaryErr) {
+        const msg = primaryErr.message || "";
+        const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand");
+        const fallbackModel = this.config.gemini.fallbackModel;
+
+        if (isUnavailable && fallbackModel) {
+          console.warn(`[AIHandler] プライマリモデル失敗。フォールバック: ${fallbackModel}`);
+          assistantMessage = await this._callWithRetry(() => tryModel(fallbackModel));
+        } else {
+          throw primaryErr;
+        }
+      }
 
       history.push({ role: "model", parts: [{ text: assistantMessage }] });
       return assistantMessage;

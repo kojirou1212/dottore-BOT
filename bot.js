@@ -301,8 +301,14 @@ client.on("messageCreate", async (message) => {
       return;
     }
     if (config.ai.typingIndicator) await message.channel.sendTyping();
-    const sound = await vcHandler.respondToMessage(userText);
-    await message.reply(sound ? `……${sound.name}。` : "……今は声が出ない。");
+    const result = await vcHandler.respondToMessage(userText);
+    if (result) {
+      const names = result.sounds.map(s => s.name).join("、");
+      const thoughtPart = result.thought ? `(${result.thought})` : "";
+      await message.reply(`……${names}。${thoughtPart}`);
+    } else {
+      await message.reply("……今は声が出ない。");
+    }
     return;
   }
 

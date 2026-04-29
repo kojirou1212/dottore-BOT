@@ -188,14 +188,14 @@ class VCHandler {
     );
   }
 
-  // ── AIによる音声選択（毎回全音声から選択）────────────────────────────────
+  // ── AIによる音声選択（毎回全音声から2つ選択）───────────────────────────
   async selectSound(userMessage) {
     const soundList = SOUND_BOARD
       .map((s, i) => `${i}: ${s.name} (タグ: ${s.tags.join(", ")})`)
       .join("\n");
 
     const prompt = `あなたはDiscordボット「ドットーレ」の音声選択AIです。
-ユーザーのメッセージに対して、ドットーレが反応として最もふさわしい音声を1つ選んでください。
+ユーザーのメッセージに対して、ドットーレが反応として最もふさわしい音声を2つ選んでください。
 
 【ユーザーのメッセージ】
 ${userMessage}
@@ -203,12 +203,13 @@ ${userMessage}
 【選択可能な音声一覧】
 ${soundList}
 
-上記リストの番号（0始まりのインデックス）だけを1つ返してください。
-他の文字は一切含めないでください。数字のみです。`;
+以下の形式で返してください（例: 3,7|うれしそうだ）：
+インデックス1,インデックス2|ドットーレが今何を考えているか一言（括弧なし・日本語・10文字以内）
 
-    try {
+他の文字は含めないでください。数字・カンマ・縦棒・日本語のみです。`;
+
+    const callGemini = async (model) => {
       const apiKey = this.config.gemini.apiKey;
-      const model = this.config.gemini.model;
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
       const res = await fetch(url, {
@@ -226,30 +227,68 @@ ${soundList}
       const data = await res.json();
 
       if (data.error) {
-        console.error(`[VCHandler] API エラー: ${data.error.code} - ${data.error.message}`);
-        return this._randomFallback();
+        const code = data.error.code;
+        const msg = data.error.message ?? "";
+        if (code === 503 || msg.includes("high demand") || msg.includes("UNAVAILABLE")) {
+          throw new Error(`503: ${msg}`);
+        }
+        console.error(`[VCHandler] API エラー: ${code} - ${msg}`);
+        return null;
       }
 
+      return data;
+    };
+
+    const parseResponse = (data) => {
       const candidate = data.candidates?.[0];
       const raw = (candidate?.content?.parts?.[0]?.text ?? "").trim();
       console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"} / AI生応答: "${raw}"`);
 
-      const index = parseInt(raw, 10);
-      if (!isNaN(index) && index >= 0 && index < SOUND_BOARD.length) {
-        const chosen = SOUND_BOARD[index];
-        console.log(`[VCHandler] AI選択音声: ${chosen.name} (index=${index})`);
-        return chosen;
+      const [indicesPart, thought = ""] = raw.split("|");
+      const indices = indicesPart.split(",").map(s => parseInt(s.trim(), 10));
+      const valid = indices.filter(i => !isNaN(i) && i >= 0 && i < SOUND_BOARD.length);
+      if (valid.length >= 2) {
+        const chosen = [SOUND_BOARD[valid[0]], SOUND_BOARD[valid[1]]];
+        console.log(`[VCHandler] AI選択音声: ${chosen.map(c => c.name).join(", ")} / 思考: "${thought}"`);
+        return { sounds: chosen, thought: thought.trim() };
+      }
+      if (valid.length === 1) {
+        const chosen = SOUND_BOARD[valid[0]];
+        return { sounds: [chosen, this._randomFallback()], thought: thought.trim() };
+      }
+      console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
+      return { sounds: this._randomFallback(2), thought: "" };
+    };
+
+    try {
+      const primaryModel = this.config.gemini.model;
+      let data = null;
+
+      try {
+        data = await callGemini(primaryModel);
+      } catch (primaryErr) {
+        const fallbackModel = this.config.gemini.fallbackModel;
+        if (fallbackModel) {
+          console.warn(`[VCHandler] プライマリモデル失敗。フォールバック: ${fallbackModel}`);
+          data = await callGemini(fallbackModel);
+        }
       }
 
-      console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
-      return this._randomFallback();
+      if (!data) return { sounds: this._randomFallback(2), thought: "" };
+      return parseResponse(data);
     } catch (err) {
       console.error("[VCHandler] AI音声選択エラー:", err.message);
-      return this._randomFallback();
+      return { sounds: this._randomFallback(2), thought: "" };
     }
   }
 
-  _randomFallback() {
+  _randomFallback(count = 1) {
+    if (count === 2) {
+      const i1 = Math.floor(Math.random() * SOUND_BOARD.length);
+      let i2 = Math.floor(Math.random() * SOUND_BOARD.length);
+      if (i2 === i1) i2 = (i2 + 1) % SOUND_BOARD.length;
+      return [SOUND_BOARD[i1], SOUND_BOARD[i2]];
+    }
     return SOUND_BOARD[Math.floor(Math.random() * SOUND_BOARD.length)];
   }
 
@@ -275,11 +314,19 @@ ${soundList}
 
     const filePath = path.join(soundsDir, matched);
     try {
-      const { createAudioResource } = voiceLib;
+      const { createAudioResource, AudioPlayerStatus } = voiceLib;
       const resource = createAudioResource(filePath);
       this.player.play(resource);
       this.isPlaying = true;
       console.log(`[VCHandler] 再生開始: ${soundEntry.name}`);
+
+      await new Promise((resolve) => {
+        const onIdle = () => { this.player.off("error", onError); resolve(); };
+        const onError = () => { this.player.off(AudioPlayerStatus.Idle, onIdle); resolve(); };
+        this.player.once(AudioPlayerStatus.Idle, onIdle);
+        this.player.once("error", onError);
+      });
+
       return true;
     } catch (err) {
       console.error("[VCHandler] 再生エラー:", err.message);
@@ -289,10 +336,14 @@ ${soundList}
 
   // ── メッセージに応じて音声を選択して再生（統合メソッド）─────────────────
   async respondToMessage(userMessage) {
-    const sound = await this.selectSound(userMessage);
-    if (!sound) return null;
-    const played = await this.playSound(sound);
-    return played ? sound : null;
+    const { sounds, thought } = await this.selectSound(userMessage);
+    const results = [];
+    for (const sound of sounds) {
+      if (!sound) continue;
+      const played = await this.playSound(sound);
+      if (played) results.push(sound);
+    }
+    return results.length > 0 ? { sounds: results, thought } : null;
   }
 }
 
