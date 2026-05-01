@@ -283,27 +283,10 @@ client.on("messageCreate", async (message) => {
     }
     const joined = await vcHandler.join(targetVC);
     if (joined) {
-      const textChannel = message.channel;
-      const guild = message.guild;
       listenCallback = async (speakerId, transcript) => {
         try {
-          const member = guild.members.cache.get(speakerId)
-            ?? await guild.members.fetch(speakerId).catch(() => null);
-          const name = member?.displayName ?? speakerId;
-          console.log(`[Bot] 音声入力 [${name}]: ${transcript}`);
-
-          const [aiText, vcResult] = await Promise.all([
-            aiHandler.generateResponse(speakerId, transcript),
-            vcHandler.respondToMessage(transcript),
-          ]);
-
-          const soundLine = vcResult
-            ? `……${vcResult.sounds.map(s => s.name).join("、")}。${vcResult.thought ? `(${vcResult.thought})` : ""}`
-            : null;
-
-          const lines = [`🎤 **${name}**：${transcript}`, aiText];
-          if (soundLine) lines.push(soundLine);
-          await textChannel.send(lines.join("\n"));
+          console.log(`[Bot] 音声入力 [${speakerId}]: ${transcript}`);
+          await vcHandler.respondToMessage(transcript);
         } catch (err) {
           console.error("[Bot] 音声応答エラー:", err.message);
         }
