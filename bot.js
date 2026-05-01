@@ -282,7 +282,31 @@ client.on("messageCreate", async (message) => {
     }
     const joined = await vcHandler.join(targetVC);
     if (joined) {
-      await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。\n\`!hakase [メッセージ]\` で私に声を出させろ。終わるなら \`!owari\` だ。`);
+      const textChannel = message.channel;
+      vcHandler.startListening(async (speakerId, transcript) => {
+        try {
+          const member = message.guild.members.cache.get(speakerId)
+            ?? await message.guild.members.fetch(speakerId).catch(() => null);
+          const name = member?.displayName ?? speakerId;
+          console.log(`[Bot] 音声入力 [${name}]: ${transcript}`);
+
+          const [aiText, vcResult] = await Promise.all([
+            aiHandler.generateResponse(speakerId, transcript),
+            vcHandler.respondToMessage(transcript),
+          ]);
+
+          const soundLine = vcResult
+            ? `……${vcResult.sounds.map(s => s.name).join("、")}。${vcResult.thought ? `(${vcResult.thought})` : ""}`
+            : null;
+
+          const lines = [`🎤 **${name}**：${transcript}`, aiText];
+          if (soundLine) lines.push(soundLine);
+          await textChannel.send(lines.join("\n"));
+        } catch (err) {
+          console.error("[Bot] 音声応答エラー:", err.message);
+        }
+      });
+      await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。声も聴いている。終わるなら \`!owari\` だ。`);
     } else {
       await message.reply("……VC参加に失敗した。権限を確認しろ。");
     }

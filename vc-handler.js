@@ -14,6 +14,40 @@ try {
   console.warn("[VCHandler] 有効にするには: npm install @discordjs/voice ffmpeg-static opusscript");
 }
 
+// ── prism-media の遅延ロード（Opusデコード用）────────────────────────────
+let prism = null;
+try {
+  prism = require(path.resolve(__dirname, "node_modules/@discordjs/voice/node_modules/prism-media"));
+  console.log("[VCHandler] prism-media ロード成功");
+} catch {
+  try {
+    prism = require("prism-media");
+    console.log("[VCHandler] prism-media ロード成功（トップレベル）");
+  } catch {
+    console.warn("[VCHandler] prism-media が見つかりません。音声認識機能は無効です。");
+  }
+}
+
+// ── PCM → WAV 変換 ────────────────────────────────────────────────────────
+function pcmToWav(pcmBuffer, sampleRate = 48000, channels = 2, bitDepth = 16) {
+  const header = Buffer.alloc(44);
+  const dataSize = pcmBuffer.length;
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * bitDepth / 8, 28);
+  header.writeUInt16LE(channels * bitDepth / 8, 32);
+  header.writeUInt16LE(bitDepth, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+
 // ── サウンドボード定義 ────────────────────────────────────────────────────
 const SOUND_BOARD = [
   { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",               tags: ["否定", "反論", "ありえない", "驚き"] },
@@ -95,14 +129,22 @@ class VCHandler {
     this.player = null;
     this.isPlaying = false;
     this.vcAvailable = voiceLib !== null;
+    this._activeStreams = new Set();
+    this._recentlyPlayed = false;
+    this._transcriptCallback = null;
 
     if (this.vcAvailable) {
       const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
       this.player = createAudioPlayer();
-      this.player.on(AudioPlayerStatus.Idle, () => { this.isPlaying = false; });
+      this.player.on(AudioPlayerStatus.Idle, () => {
+        this.isPlaying = false;
+        this._recentlyPlayed = true;
+        setTimeout(() => { this._recentlyPlayed = false; }, 800);
+      });
       this.player.on("error", (err) => {
         console.error("[VCHandler] AudioPlayer error:", err.message);
         this.isPlaying = false;
+        this._recentlyPlayed = false;
       });
     }
   }
@@ -120,6 +162,7 @@ class VCHandler {
       // Disconnected になったら破棄して null に
       if (newStatus === VoiceConnectionStatus.Disconnected) {
         console.log(`[VCHandler] 外部切断を検知 (${oldStatus} → ${newStatus})。接続をクリーンアップします。`);
+        this.stopListening();
         try {
           this.connection.destroy();
         } catch (_) { /* すでに破棄済みの場合は無視 */ }
@@ -129,6 +172,7 @@ class VCHandler {
 
       // Destroyed になった場合も null に
       if (newStatus === VoiceConnectionStatus.Destroyed) {
+        this.stopListening();
         this.connection = null;
         this.isPlaying = false;
       }
@@ -169,6 +213,7 @@ class VCHandler {
   // ── VC からの退出 ────────────────────────────────────────────────────────
   leave() {
     if (this.connection) {
+      this.stopListening();
       this.player.stop();
       try { this.connection.destroy(); } catch (_) {}
       this.connection = null;
@@ -344,6 +389,88 @@ ${soundList}
       if (played) results.push(sound);
     }
     return results.length > 0 ? { sounds: results, thought } : null;
+  }
+
+  // ── 音声受信・文字起こし開始 ──────────────────────────────────────────────
+  startListening(onTranscript) {
+    if (!this.vcAvailable || !this.connection || !prism) {
+      if (!prism) console.warn("[VCHandler] prism-media 未ロードのため音声認識不可");
+      return;
+    }
+    this._transcriptCallback = onTranscript;
+    const { EndBehaviorType } = voiceLib;
+    const receiver = this.connection.receiver;
+
+    receiver.speaking.on("start", (userId) => {
+      if (this.isPlaying || this._recentlyPlayed || this._activeStreams.has(userId)) return;
+      this._activeStreams.add(userId);
+
+      const opusStream = receiver.subscribe(userId, {
+        end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
+      });
+
+      const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+      const pcmChunks = [];
+
+      opusStream.pipe(decoder);
+      decoder.on("data", (chunk) => pcmChunks.push(chunk));
+      decoder.on("end", async () => {
+        this._activeStreams.delete(userId);
+        const pcm = Buffer.concat(pcmChunks);
+        // 0.5秒未満は無視
+        if (pcm.length < 48000 * 2 * 2 * 0.5) return;
+
+        try {
+          const wav = pcmToWav(pcm);
+          const text = await this._transcribeAudio(wav);
+          if (text && text.trim() && this._transcriptCallback) {
+            console.log(`[VCHandler] 音声認識 [${userId}]: ${text.trim()}`);
+            this._transcriptCallback(userId, text.trim());
+          }
+        } catch (err) {
+          console.error("[VCHandler] 音声認識エラー:", err.message);
+        }
+      });
+
+      decoder.on("error", (err) => {
+        console.error("[VCHandler] Opusデコードエラー:", err.message);
+        this._activeStreams.delete(userId);
+      });
+    });
+
+    console.log("[VCHandler] 音声受信開始");
+  }
+
+  stopListening() {
+    this._transcriptCallback = null;
+    this._activeStreams.clear();
+  }
+
+  // ── Gemini Audio API による文字起こし ────────────────────────────────────
+  async _transcribeAudio(wavBuffer) {
+    const apiKey = this.config.gemini.apiKey;
+    // 音声理解には gemini-2.0-flash が安定
+    const model = this.config.gemini.fallbackModel || this.config.gemini.model;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: "audio/wav", data: wavBuffer.toString("base64") } },
+            { text: "音声を正確に日本語で文字起こしして。発言内容のみ返して。無音・雑音・聞き取れない場合は空文字を返して。" },
+          ],
+        }],
+        generationConfig: { maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } },
+      }),
+    });
+
+    const data = await res.json();
+    if (data.error) throw new Error(`STT API error: ${data.error.message}`);
+    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
   }
 }
 
