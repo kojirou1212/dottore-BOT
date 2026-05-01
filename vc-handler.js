@@ -151,32 +151,31 @@ class VCHandler {
   }
 
   // ── 外部切断の検知・自動クリーンアップ ──────────────────────────────────
-  // Discord側でBotをVCから切断した場合に connection を null にする
   _setupConnectionListeners() {
     if (!this.connection || !voiceLib) return;
-    const { VoiceConnectionStatus } = voiceLib;
+    const { VoiceConnectionStatus, entersState } = voiceLib;
 
-    this.connection.on("stateChange", (oldState, newState) => {
-      const oldStatus = oldState.status;
-      const newStatus = newState.status;
-
-      // Disconnected になったら破棄して null に
-      if (newStatus === VoiceConnectionStatus.Disconnected) {
-        console.log(`[VCHandler] 外部切断を検知 (${oldStatus} → ${newStatus})。接続をクリーンアップします。`);
+    this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      try {
+        // 5秒以内に Signalling/Connecting に戻れば再接続中なので待つ
+        await Promise.race([
+          entersState(this.connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(this.connection, VoiceConnectionStatus.Connecting, 5_000),
+        ]);
+      } catch {
+        // 再接続できなければ本当の切断として扱う
+        console.log("[VCHandler] 外部切断を検知。接続をクリーンアップします。");
         this.stopListening();
-        try {
-          this.connection.destroy();
-        } catch (_) { /* すでに破棄済みの場合は無視 */ }
+        try { this.connection.destroy(); } catch (_) {}
         this.connection = null;
         this.isPlaying = false;
       }
+    });
 
-      // Destroyed になった場合も null に
-      if (newStatus === VoiceConnectionStatus.Destroyed) {
-        this.stopListening();
-        this.connection = null;
-        this.isPlaying = false;
-      }
+    this.connection.on(VoiceConnectionStatus.Destroyed, () => {
+      this.stopListening();
+      this.connection = null;
+      this.isPlaying = false;
     });
   }
 
@@ -196,11 +195,10 @@ class VCHandler {
         selfMute: false,
       });
 
-      // 外部切断を自動検知するリスナーを登録
-      this._setupConnectionListeners();
-
-      await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
+      await entersState(this.connection, VoiceConnectionStatus.Ready, 30_000);
       if (this.player) this.connection.subscribe(this.player);
+      // Ready 確認後にリスナーを登録（初期接続中の Disconnected を誤検知しない）
+      this._setupConnectionListeners();
       console.log(`[VCHandler] VC参加完了: ${voiceChannel.name}`);
       return true;
     } catch (err) {
