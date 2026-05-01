@@ -132,6 +132,7 @@ class VCHandler {
     this._activeStreams = new Set();
     this._recentlyPlayed = false;
     this._transcriptCallback = null;
+    this._speakingHandler = null;
 
     if (this.vcAvailable) {
       const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
@@ -391,18 +392,28 @@ ${soundList}
     return results.length > 0 ? { sounds: results, thought } : null;
   }
 
+  isListening() {
+    return this._transcriptCallback !== null;
+  }
+
   // ── 音声受信・文字起こし開始 ──────────────────────────────────────────────
   startListening(onTranscript) {
     if (!this.vcAvailable || !this.connection || !prism) {
       if (!prism) console.warn("[VCHandler] prism-media 未ロードのため音声認識不可");
-      return;
+      return false;
+    }
+    // 既存リスナーを先に解除（重複防止）
+    if (this._speakingHandler) {
+      this.connection.receiver.speaking.off("start", this._speakingHandler);
+      this._speakingHandler = null;
     }
     this._transcriptCallback = onTranscript;
     const { EndBehaviorType } = voiceLib;
     const receiver = this.connection.receiver;
 
-    receiver.speaking.on("start", (userId) => {
+    this._speakingHandler = (userId) => {
       if (this.isPlaying || this._recentlyPlayed || this._activeStreams.has(userId)) return;
+      if (!this._transcriptCallback) return;
       this._activeStreams.add(userId);
 
       const opusStream = receiver.subscribe(userId, {
@@ -436,12 +447,18 @@ ${soundList}
         console.error("[VCHandler] Opusデコードエラー:", err.message);
         this._activeStreams.delete(userId);
       });
-    });
+    };
 
+    receiver.speaking.on("start", this._speakingHandler);
     console.log("[VCHandler] 音声受信開始");
+    return true;
   }
 
   stopListening() {
+    if (this._speakingHandler && this.connection) {
+      this.connection.receiver.speaking.off("start", this._speakingHandler);
+    }
+    this._speakingHandler = null;
     this._transcriptCallback = null;
     this._activeStreams.clear();
   }
@@ -449,8 +466,7 @@ ${soundList}
   // ── Gemini Audio API による文字起こし ────────────────────────────────────
   async _transcribeAudio(wavBuffer) {
     const apiKey = this.config.gemini.apiKey;
-    // 音声理解には gemini-2.0-flash が安定
-    const model = this.config.gemini.fallbackModel || this.config.gemini.model;
+    const model = this.config.gemini.model;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const res = await fetch(url, {

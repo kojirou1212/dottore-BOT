@@ -107,6 +107,7 @@ const targetChannelIds = new Set(config.discord.targetChannelIds);
 
 // 一人になったときの退出タイマー
 let aloneTimer = null;
+let listenCallback = null;
 
 function pick(listName) {
   const list = messageLists[listName];
@@ -283,10 +284,11 @@ client.on("messageCreate", async (message) => {
     const joined = await vcHandler.join(targetVC);
     if (joined) {
       const textChannel = message.channel;
-      vcHandler.startListening(async (speakerId, transcript) => {
+      const guild = message.guild;
+      listenCallback = async (speakerId, transcript) => {
         try {
-          const member = message.guild.members.cache.get(speakerId)
-            ?? await message.guild.members.fetch(speakerId).catch(() => null);
+          const member = guild.members.cache.get(speakerId)
+            ?? await guild.members.fetch(speakerId).catch(() => null);
           const name = member?.displayName ?? speakerId;
           console.log(`[Bot] 音声入力 [${name}]: ${transcript}`);
 
@@ -305,7 +307,8 @@ client.on("messageCreate", async (message) => {
         } catch (err) {
           console.error("[Bot] 音声応答エラー:", err.message);
         }
-      });
+      };
+      vcHandler.startListening(listenCallback);
       await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。声も聴いている。終わるなら \`!owari\` だ。`);
     } else {
       await message.reply("……VC参加に失敗した。権限を確認しろ。");
@@ -341,8 +344,24 @@ client.on("messageCreate", async (message) => {
     case "!owari":
       if (!vcHandler.isConnected()) { await message.reply("……VCには入っていない。"); return; }
       if (aloneTimer) { clearTimeout(aloneTimer); aloneTimer = null; }
+      listenCallback = null;
       vcHandler.leave();
       await message.reply("……退出する。観察記録は保存した。");
+      return;
+
+    case "!kike":
+      if (!vcHandler.isConnected()) { await message.reply("……VCに入っていない。まず `!kanshi` を実行しろ。"); return; }
+      if (vcHandler.isListening()) { await message.reply("……もう聴いている。"); return; }
+      if (!listenCallback) { await message.reply("……`!kanshi` で参加し直せ。"); return; }
+      vcHandler.startListening(listenCallback);
+      await message.reply("……聴く。");
+      return;
+
+    case "!kikanai":
+      if (!vcHandler.isConnected()) { await message.reply("……VCに入っていない。"); return; }
+      if (!vcHandler.isListening()) { await message.reply("……もう聴いていない。"); return; }
+      vcHandler.stopListening();
+      await message.reply("……無視する。");
       return;
 
     case "!reset":
@@ -385,8 +404,10 @@ client.on("messageCreate", async (message) => {
         "!work          … 作業・勉強を開始する\n" +
         "!observe       … 観察してほしいとき\n" +
         "!reward        … 成功・達成を報告する\n" +
-        "!kanshi [VC名] … VCに召喚\n" +
+        "!kanshi [VC名] … VCに召喚（音声聴き取りON）\n" +
         "!hakase [msg]  … VCで音声再生\n" +
+        "!kike          … 音声聴き取りON\n" +
+        "!kikanai       … 音声聴き取りOFF\n" +
         "!owari         … VCから退出\n" +
         "!reload        … messages.json を再読み込み\n" +
         "!help          … このヘルプを表示\n\n" +
