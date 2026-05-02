@@ -241,7 +241,7 @@ class VCHandler {
       .join("\n");
 
     const prompt = `あなたはDiscordボット「ドットーレ」の音声選択AIです。
-ユーザーのメッセージに対して、ドットーレが反応として最もふさわしい音声を2つ選んでください。
+ユーザーのメッセージに対して、ドットーレが反応として最もふさわしい音声を1つ選んでください。
 
 【ユーザーのメッセージ】
 ${userMessage}
@@ -249,10 +249,10 @@ ${userMessage}
 【選択可能な音声一覧】
 ${soundList}
 
-以下の形式で返してください（例: 3,7|うれしそうだ）：
-インデックス1,インデックス2|ドットーレが今何を考えているか一言（括弧なし・日本語・10文字以内）
+以下の形式で返してください（例: 3|うれしそうだ）：
+インデックス|ドットーレが今何を考えているか一言（括弧なし・日本語・10文字以内）
 
-他の文字は含めないでください。数字・カンマ・縦棒・日本語のみです。`;
+他の文字は含めないでください。数字・縦棒・日本語のみです。`;
 
     const callGemini = async (model) => {
       const apiKey = this.config.gemini.apiKey;
@@ -290,20 +290,15 @@ ${soundList}
       const raw = (candidate?.content?.parts?.[0]?.text ?? "").trim();
       console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"} / AI生応答: "${raw}"`);
 
-      const [indicesPart, thought = ""] = raw.split("|");
-      const indices = indicesPart.split(",").map(s => parseInt(s.trim(), 10));
-      const valid = indices.filter(i => !isNaN(i) && i >= 0 && i < SOUND_BOARD.length);
-      if (valid.length >= 2) {
-        const chosen = [SOUND_BOARD[valid[0]], SOUND_BOARD[valid[1]]];
-        console.log(`[VCHandler] AI選択音声: ${chosen.map(c => c.name).join(", ")} / 思考: "${thought}"`);
-        return { sounds: chosen, thought: thought.trim() };
-      }
-      if (valid.length === 1) {
-        const chosen = SOUND_BOARD[valid[0]];
-        return { sounds: [chosen, this._randomFallback()], thought: thought.trim() };
+      const [indexPart, thought = ""] = raw.split("|");
+      const index = parseInt(indexPart.trim(), 10);
+      if (!isNaN(index) && index >= 0 && index < SOUND_BOARD.length) {
+        const chosen = SOUND_BOARD[index];
+        console.log(`[VCHandler] AI選択音声: ${chosen.name} / 思考: "${thought}"`);
+        return { sounds: [chosen], thought: thought.trim() };
       }
       console.warn(`[VCHandler] AI応答パース失敗: "${raw}" → ランダム選択`);
-      return { sounds: this._randomFallback(2), thought: "" };
+      return { sounds: [this._randomFallback()], thought: "" };
     };
 
     try {
