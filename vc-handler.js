@@ -133,6 +133,8 @@ class VCHandler {
     this._recentlyPlayed = false;
     this._transcriptCallback = null;
     this._speakingHandler = null;
+    this._lastResponseTime = 0;
+    this._cooldownMs = config.ai?.listenCooldownMs ?? 15000;
 
     if (this.vcAvailable) {
       const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
@@ -411,8 +413,10 @@ ${soundList}
 
     this._speakingHandler = (userId) => {
       if (this.isPlaying || this._recentlyPlayed || this._activeStreams.has(userId)) return;
+      if (Date.now() - this._lastResponseTime < this._cooldownMs) return;
       if (!this._transcriptCallback) return;
       this._activeStreams.add(userId);
+      this._lastResponseTime = Date.now();
 
       const opusStream = receiver.subscribe(userId, {
         end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
