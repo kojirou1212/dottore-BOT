@@ -474,7 +474,7 @@ ${soundList}
           role: "user",
           parts: [
             { inlineData: { mimeType: "audio/wav", data: wavBuffer.toString("base64") } },
-            { text: "音声を正確に日本語で文字起こしして。発言内容のみ返して。無音・雑音・聞き取れない場合は空文字を返して。" },
+            { text: "音声を日本語で文字起こしして。発言内容のみ返して。無音・雑音・息・笑い声のみ・聞き取れない場合は必ず空文字（何も返さない）を返して。説明・補足・括弧書きは禁止。" },
           ],
         }],
         generationConfig: { maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } },
@@ -483,7 +483,12 @@ ${soundList}
 
     const data = await res.json();
     if (data.error) throw new Error(`STT API error: ${data.error.message}`);
-    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+    if (!raw) return null;
+    // 無音・雑音系の返答はスキップ
+    const silencePattern = /^[\s（\(]*(無音|雑音|無発話|聞き取れ|silence|noise|inaudible|none|empty|n\/a)[\s）\)]*$/i;
+    if (silencePattern.test(raw)) return null;
+    return raw;
   }
 }
 
