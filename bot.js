@@ -286,28 +286,7 @@ client.on("messageCreate", async (message) => {
       listenCallback = async (speakerId, transcript) => {
         try {
           console.log(`[Bot] 音声入力 [${speakerId}]: ${transcript}`);
-
-          const notifyChannelId = [...targetChannelIds][0];
-          const channel = notifyChannelId
-            ? await client.channels.fetch(notifyChannelId).catch(() => null)
-            : null;
-
-          // サウンド再生とAI文章生成を並列実行
-          const soundPromise = vcHandler.respondToMessage(transcript);
-          const aiReply = channel?.isTextBased()
-            ? await aiHandler.generateResponse(speakerId, transcript).catch((e) => {
-                console.error("[Bot] 音声→AI応答エラー:", e.message);
-                return null;
-              })
-            : null;
-
-          if (aiReply && channel?.isTextBased()) {
-            await channel.send(aiReply.slice(0, 2000));
-          }
-
-          await soundPromise.catch((err) =>
-            console.error("[Bot] VC音声再生エラー:", err.message)
-          );
+          await vcHandler.respondToMessage(transcript);
         } catch (err) {
           console.error("[Bot] 音声応答エラー:", err.message);
         }
