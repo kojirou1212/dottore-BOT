@@ -17,9 +17,6 @@ if (process.env.DISCORD_TOKEN) {
       targetChannelIds: process.env.TARGET_CHANNEL_IDS
         ? process.env.TARGET_CHANNEL_IDS.split(",").map((s) => s.trim())
         : [],
-      notifyChannelIds: process.env.NOTIFY_CHANNEL_IDS
-        ? process.env.NOTIFY_CHANNEL_IDS.split(",").map((s) => s.trim())
-        : null,
       voiceChannelId: process.env.VOICE_CHANNEL_ID || "",
     },
     gemini: {
@@ -107,10 +104,6 @@ const client = new Client({
 const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
 const targetChannelIds = new Set(config.discord.targetChannelIds);
-// 定刻通知・VC退出通知・音声→AI返答の送信先（未設定時は targetChannelIds と同じ）
-const notifyChannelIds = config.discord.notifyChannelIds
-  ? new Set(config.discord.notifyChannelIds)
-  : targetChannelIds;
 
 // 一人になったときの退出タイマー
 let aloneTimer = null;
@@ -164,7 +157,7 @@ function startScheduler() {
     if (!text) return;
 
     console.log(`[Scheduler] 定時メッセージ送信 hour=${hour} list=${listName}`);
-    for (const channelId of notifyChannelIds) {
+    for (const channelId of targetChannelIds) {
       try {
         const channel = await client.channels.fetch(channelId);
         if (!channel || !channel.isTextBased()) continue;
@@ -212,7 +205,7 @@ client.on("voiceStateUpdate", (oldState, newState) => {
         vcHandler.leave();
         console.log("[Bot] 無人のため自動退出しました。");
         // テキストチャンネルに通知
-        const notifyChannelId = [...notifyChannelIds][0];
+        const notifyChannelId = [...targetChannelIds][0];
         if (notifyChannelId) {
           client.channels.fetch(notifyChannelId)
             .then((ch) => ch?.send("……観察終了、記録した。退出する。"))
@@ -294,7 +287,7 @@ client.on("messageCreate", async (message) => {
         try {
           console.log(`[Bot] 音声入力 [${speakerId}]: ${transcript}`);
 
-          const notifyChannelId = [...notifyChannelIds][0];
+          const notifyChannelId = [...targetChannelIds][0];
           const channel = notifyChannelId
             ? await client.channels.fetch(notifyChannelId).catch(() => null)
             : null;
