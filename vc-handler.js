@@ -441,23 +441,26 @@ ${soundList}
         }
         if (pcm.length > MAX_PCM) pcm = pcm.subarray(0, MAX_PCM);
 
+        let responded = false;
         try {
           const wav = pcmToWav(pcm);
           const text = await this._transcribeAudio(wav);
           if (text && text.trim() && this._transcriptCallback) {
             console.log(`[VCHandler] 音声認識 [${userId}]: ${text.trim()}`);
             await this._transcriptCallback(userId, text.trim());
+            responded = true;
           }
         } catch (err) {
           console.error("[VCHandler] 音声認識エラー:", err.message);
         } finally {
           this._activeStreams.delete(userId);
-          this._lastResponseTime = Date.now();
+          if (responded) this._lastResponseTime = Date.now();
         }
       });
 
       decoder.on("error", (err) => {
         console.error("[VCHandler] Opusデコードエラー:", err.message);
+        opusStream.destroy();
         this._activeStreams.delete(userId);
       });
     };
