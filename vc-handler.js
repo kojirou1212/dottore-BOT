@@ -14,6 +14,22 @@ try {
   console.warn("[VCHandler] 有効にするには: npm install @discordjs/voice ffmpeg-static opusscript");
 }
 
+// ── ffmpeg 確認（Raspberry Pi / ARM環境でのデバッグ用）──────────────────────
+(function checkFfmpeg() {
+  try {
+    const p = require("ffmpeg-static");
+    if (p) {
+      console.log(`[VCHandler] ffmpeg-static: ${p}`);
+    } else {
+      console.warn("[VCHandler] ffmpeg-static からパスを取得できません。システムffmpegを使用します。");
+      console.warn("[VCHandler]   → sudo apt install ffmpeg  を実行してください。");
+    }
+  } catch {
+    console.warn("[VCHandler] ffmpeg-staticが使用不可。システムffmpegを使用します。");
+    console.warn("[VCHandler]   → sudo apt install ffmpeg  を実行してください。");
+  }
+})();
+
 // ── prism-media の遅延ロード（Opusデコード用）────────────────────────────
 let prism = null;
 try {
@@ -234,7 +250,7 @@ class VCHandler {
     );
   }
 
-  // ── AIによる音声選択（毎回全音声から2つ選択）───────────────────────────
+  // ── AIによる音声選択 ─────────────────────────────────────────────────────
   async selectSound(userMessage) {
     const soundList = SOUND_BOARD
       .map((s, i) => `${i}: ${s.name} (タグ: ${s.tags.join(", ")})`)
@@ -315,21 +331,15 @@ ${soundList}
         }
       }
 
-      if (!data) return { sounds: this._randomFallback(2), thought: "" };
+      if (!data) return { sounds: [this._randomFallback()], thought: "" };
       return parseResponse(data);
     } catch (err) {
       console.error("[VCHandler] AI音声選択エラー:", err.message);
-      return { sounds: this._randomFallback(2), thought: "" };
+      return { sounds: [this._randomFallback()], thought: "" };
     }
   }
 
-  _randomFallback(count = 1) {
-    if (count === 2) {
-      const i1 = Math.floor(Math.random() * SOUND_BOARD.length);
-      let i2 = Math.floor(Math.random() * SOUND_BOARD.length);
-      if (i2 === i1) i2 = (i2 + 1) % SOUND_BOARD.length;
-      return [SOUND_BOARD[i1], SOUND_BOARD[i2]];
-    }
+  _randomFallback() {
     return SOUND_BOARD[Math.floor(Math.random() * SOUND_BOARD.length)];
   }
 
@@ -407,11 +417,11 @@ ${soundList}
     const receiver = this.connection.receiver;
 
     this._speakingHandler = (userId) => {
-      if (this.isPlaying || this._recentlyPlayed || this._activeStreams.has(userId)) return;
+      if (this.isPlaying || this._recentlyPlayed) return;
+      if (this._activeStreams.size > 0) return;
       if (Date.now() - this._lastResponseTime < this._cooldownMs) return;
       if (!this._transcriptCallback) return;
       this._activeStreams.add(userId);
-      this._lastResponseTime = Date.now();
 
       const opusStream = receiver.subscribe(userId, {
         end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
@@ -423,20 +433,26 @@ ${soundList}
       opusStream.pipe(decoder);
       decoder.on("data", (chunk) => pcmChunks.push(chunk));
       decoder.on("end", async () => {
-        this._activeStreams.delete(userId);
-        const pcm = Buffer.concat(pcmChunks);
-        // 0.5秒未満は無視
-        if (pcm.length < 48000 * 2 * 2 * 0.5) return;
+        const MAX_PCM = 48000 * 2 * 2 * 30; // 30秒上限
+        let pcm = Buffer.concat(pcmChunks);
+        if (pcm.length < 48000 * 2 * 2 * 0.5) {
+          this._activeStreams.delete(userId);
+          return;
+        }
+        if (pcm.length > MAX_PCM) pcm = pcm.subarray(0, MAX_PCM);
 
         try {
           const wav = pcmToWav(pcm);
           const text = await this._transcribeAudio(wav);
           if (text && text.trim() && this._transcriptCallback) {
             console.log(`[VCHandler] 音声認識 [${userId}]: ${text.trim()}`);
-            this._transcriptCallback(userId, text.trim());
+            await this._transcriptCallback(userId, text.trim());
           }
         } catch (err) {
           console.error("[VCHandler] 音声認識エラー:", err.message);
+        } finally {
+          this._activeStreams.delete(userId);
+          this._lastResponseTime = Date.now();
         }
       });
 
@@ -463,31 +479,59 @@ ${soundList}
   // ── Gemini Audio API による文字起こし ────────────────────────────────────
   async _transcribeAudio(wavBuffer) {
     const apiKey = this.config.gemini.apiKey;
-    const model = this.config.gemini.model;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          role: "user",
-          parts: [
-            { inlineData: { mimeType: "audio/wav", data: wavBuffer.toString("base64") } },
-            { text: "音声を日本語で文字起こしして。発言内容のみ返して。無音・雑音・息・笑い声のみ・聞き取れない場合は必ず空文字（何も返さない）を返して。説明・補足・括弧書きは禁止。" },
-          ],
-        }],
-        generationConfig: { maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } },
-      }),
-    });
+    const callSTT = async (model) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{
+              role: "user",
+              parts: [
+                { inlineData: { mimeType: "audio/wav", data: wavBuffer.toString("base64") } },
+                { text: 'Transcribe the Japanese speech in this audio. Output only the spoken words in Japanese. If the audio contains silence, noise, breathing, or unclear/inaudible speech, output exactly: SILENT' },
+              ],
+            }],
+            generationConfig: { maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } },
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const data = await res.json();
+      if (data.error) {
+        const msg = data.error.message ?? "";
+        const code = data.error.code;
+        if (code === 503 || msg.includes("high demand") || msg.includes("UNAVAILABLE")) {
+          throw new Error(`503: ${msg}`);
+        }
+        throw new Error(`STT API error: ${msg}`);
+      }
+      return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+    };
 
-    const data = await res.json();
-    if (data.error) throw new Error(`STT API error: ${data.error.message}`);
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
-    if (!raw) return null;
-    // 無音・雑音系の返答はスキップ
-    const silencePattern = /^[\s（\(]*(無音|雑音|無発話|聞き取れ|silence|noise|inaudible|none|empty|n\/a)[\s）\)]*$/i;
-    if (silencePattern.test(raw)) return null;
+    const primaryModel = this.config.gemini.model;
+    let raw = null;
+    try {
+      raw = await callSTT(primaryModel);
+    } catch (primaryErr) {
+      const msg = primaryErr.message ?? "";
+      const fallbackModel = this.config.gemini.fallbackModel;
+      if (fallbackModel && (msg.includes("503") || msg.includes("UNAVAILABLE"))) {
+        console.warn(`[VCHandler] STTプライマリ失敗。フォールバック: ${fallbackModel}`);
+        raw = await callSTT(fallbackModel);
+      } else {
+        throw primaryErr;
+      }
+    }
+
+    if (!raw || raw.toUpperCase() === "SILENT") return null;
     return raw;
   }
 }

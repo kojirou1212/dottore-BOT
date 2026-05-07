@@ -17,6 +17,9 @@ if (process.env.DISCORD_TOKEN) {
       targetChannelIds: process.env.TARGET_CHANNEL_IDS
         ? process.env.TARGET_CHANNEL_IDS.split(",").map((s) => s.trim())
         : [],
+      notifyChannelIds: process.env.NOTIFY_CHANNEL_IDS
+        ? process.env.NOTIFY_CHANNEL_IDS.split(",").map((s) => s.trim())
+        : null,
       voiceChannelId: process.env.VOICE_CHANNEL_ID || "",
     },
     gemini: {
@@ -104,6 +107,10 @@ const client = new Client({
 const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
 const targetChannelIds = new Set(config.discord.targetChannelIds);
+// 定刻通知・VC退出通知・音声→AI返答の送信先（未設定時は targetChannelIds と同じ）
+const notifyChannelIds = config.discord.notifyChannelIds
+  ? new Set(config.discord.notifyChannelIds)
+  : targetChannelIds;
 
 // 一人になったときの退出タイマー
 let aloneTimer = null;
@@ -157,7 +164,7 @@ function startScheduler() {
     if (!text) return;
 
     console.log(`[Scheduler] 定時メッセージ送信 hour=${hour} list=${listName}`);
-    for (const channelId of targetChannelIds) {
+    for (const channelId of notifyChannelIds) {
       try {
         const channel = await client.channels.fetch(channelId);
         if (!channel || !channel.isTextBased()) continue;
@@ -204,8 +211,8 @@ client.on("voiceStateUpdate", (oldState, newState) => {
       if (stillAlone) {
         vcHandler.leave();
         console.log("[Bot] 無人のため自動退出しました。");
-        // テキストチャンネルに通知（最初の監視チャンネル）
-        const notifyChannelId = [...targetChannelIds][0];
+        // テキストチャンネルに通知
+        const notifyChannelId = [...notifyChannelIds][0];
         if (notifyChannelId) {
           client.channels.fetch(notifyChannelId)
             .then((ch) => ch?.send("……観察終了、記録した。退出する。"))
@@ -286,7 +293,28 @@ client.on("messageCreate", async (message) => {
       listenCallback = async (speakerId, transcript) => {
         try {
           console.log(`[Bot] 音声入力 [${speakerId}]: ${transcript}`);
-          await vcHandler.respondToMessage(transcript);
+
+          const notifyChannelId = [...notifyChannelIds][0];
+          const channel = notifyChannelId
+            ? await client.channels.fetch(notifyChannelId).catch(() => null)
+            : null;
+
+          // サウンド再生とAI文章生成を並列実行
+          const soundPromise = vcHandler.respondToMessage(transcript);
+          const aiReply = channel?.isTextBased()
+            ? await aiHandler.generateResponse(speakerId, transcript).catch((e) => {
+                console.error("[Bot] 音声→AI応答エラー:", e.message);
+                return null;
+              })
+            : null;
+
+          if (aiReply && channel?.isTextBased()) {
+            await channel.send(aiReply.slice(0, 2000));
+          }
+
+          await soundPromise.catch((err) =>
+            console.error("[Bot] VC音声再生エラー:", err.message)
+          );
         } catch (err) {
           console.error("[Bot] 音声応答エラー:", err.message);
         }
@@ -412,6 +440,13 @@ client.on("messageCreate", async (message) => {
       for (const chunk of chunks) await message.channel.send(chunk);
     }
     console.log(`[Bot] 返答送信完了 [${userTag}]`);
+
+    // VCに接続中なら音声も再生（非同期・応答は待たない）
+    if (vcHandler.isConnected()) {
+      vcHandler.respondToMessage(content).catch((err) =>
+        console.error("[Bot] テキスト→VC音声エラー:", err.message)
+      );
+    }
   } catch (error) {
     console.error(`[Bot] エラー [${userTag}]:`, error.message);
     await message.reply(config.ai.errorMessage);
