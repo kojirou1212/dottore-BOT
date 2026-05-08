@@ -144,10 +144,8 @@ function startScheduler() {
     lastSentHour = hour;
 
     if (hour === 4) {
-      console.log("[Scheduler] 定期再起動 (04:00 JST)...");
-      try { aiHandler.clearAllHistory(); } finally {
-        setTimeout(() => process.exit(0), 3000);
-      }
+      console.log("[Scheduler] 定期履歴クリア (04:00 JST)");
+      aiHandler.clearAllHistory();
       return;
     }
 

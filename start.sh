@@ -32,4 +32,8 @@ if [ ! -f "config.json" ] && [ -z "$DISCORD_TOKEN" ]; then
 fi
 
 echo "[Bot] 起動します..."
-exec node bot.js
+while true; do
+  node bot.js
+  echo "[Bot] プロセスが終了しました。5秒後に再起動します..."
+  sleep 5
+done
