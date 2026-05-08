@@ -86,6 +86,7 @@ const SOUND_BOARD = [
   { name: "動くな。",                 file: "動くな。.mp3",                      tags: ["制止", "命令", "威圧", "止まれ"] },
   { name: "おっと、これは褒め言葉ではないぞ？",                 file: "おっと、これは褒め言葉ではないぞ？.mp3",                      tags: ["呆れ", "軽蔑", "興味なし", "余裕"] },
   { name: "ここの看板メニューを食べないのか？",                 file: "ここの看板メニューを食べないのか？.mp3",                      tags: ["空腹", "興味", "提案", "余裕"] },
+  { name: "無音",                                               file: "無音.mp3",                                                    tags: ["無音", "沈黙", "無反応", "間"] },
 ];
 
 // ── ファジー正規化 ─────────────────────────────────────────────────────────
@@ -394,7 +395,14 @@ ${soundList}
       const played = await this.playSound(sound);
       if (played) results.push(sound);
     }
-    return results.length > 0 ? { sounds: results, thought } : null;
+    if (results.length > 0) return { sounds: results, thought };
+
+    const silent = SOUND_BOARD.find((s) => s.file === "無音.mp3");
+    if (silent) {
+      const played = await this.playSound(silent);
+      if (played) return { sounds: [silent], thought: "" };
+    }
+    return null;
   }
 
   isListening() {

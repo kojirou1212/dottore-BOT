@@ -109,6 +109,55 @@ const targetChannelIds = new Set(config.discord.targetChannelIds);
 let aloneTimer = null;
 let listenCallback = null;
 
+// ─── VC状態の永続化（再起動後に自動再参加するため）─────────────────────────
+const VC_STATE_PATH = path.join(__dirname, "vc-state.json");
+
+function saveVCState(guildId, channelId) {
+  try {
+    fs.writeFileSync(VC_STATE_PATH, JSON.stringify({ guildId, channelId }), "utf-8");
+  } catch (err) {
+    console.error("[Bot] VC状態保存失敗:", err.message);
+  }
+}
+
+function clearVCState() {
+  try {
+    if (fs.existsSync(VC_STATE_PATH)) fs.unlinkSync(VC_STATE_PATH);
+  } catch (_) {}
+}
+
+function makeListenCallback() {
+  return async (speakerId, transcript) => {
+    try {
+      console.log(`[Bot] 音声入力 [${speakerId}]: ${transcript}`);
+      await vcHandler.respondToMessage(transcript);
+    } catch (err) {
+      console.error("[Bot] 音声応答エラー:", err.message);
+    }
+  };
+}
+
+async function autoRejoinVC() {
+  if (!fs.existsSync(VC_STATE_PATH)) return;
+  try {
+    const { guildId, channelId } = JSON.parse(fs.readFileSync(VC_STATE_PATH, "utf-8"));
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { clearVCState(); return; }
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel || !channel.isVoiceBased()) { clearVCState(); return; }
+    const joined = await vcHandler.join(channel);
+    if (joined) {
+      listenCallback = makeListenCallback();
+      vcHandler.startListening(listenCallback);
+      console.log(`[Bot] VC自動再参加完了: ${channel.name}`);
+    } else {
+      console.warn("[Bot] VC自動再参加失敗（権限または接続エラー）");
+    }
+  } catch (err) {
+    console.error("[Bot] VC自動再参加エラー:", err.message);
+  }
+}
+
 function pick(listName) {
   const list = messageLists[listName];
   if (!list || list.length === 0) return null;
@@ -168,11 +217,12 @@ function startScheduler() {
 }
 
 // ─── Ready ────────────────────────────────────────────────────────────────
-client.once("clientReady", () => {
+client.once("clientReady", async () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
   console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
   startScheduler();
+  await autoRejoinVC();
 });
 
 // ─── VC人数監視：一人になったら5秒後に退出 ───────────────────────────────
@@ -281,15 +331,9 @@ client.on("messageCreate", async (message) => {
     }
     const joined = await vcHandler.join(targetVC);
     if (joined) {
-      listenCallback = async (speakerId, transcript) => {
-        try {
-          console.log(`[Bot] 音声入力 [${speakerId}]: ${transcript}`);
-          await vcHandler.respondToMessage(transcript);
-        } catch (err) {
-          console.error("[Bot] 音声応答エラー:", err.message);
-        }
-      };
+      listenCallback = makeListenCallback();
       vcHandler.startListening(listenCallback);
+      saveVCState(message.guild.id, targetVC.id);
       await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。声も聴いている。終わるなら \`!owari\` だ。`);
     } else {
       await message.reply("……VC参加に失敗した。権限を確認しろ。");
@@ -327,6 +371,7 @@ client.on("messageCreate", async (message) => {
       if (aloneTimer) { clearTimeout(aloneTimer); aloneTimer = null; }
       listenCallback = null;
       vcHandler.leave();
+      clearVCState();
       await message.reply("……退出する。観察記録は保存した。");
       return;
 
