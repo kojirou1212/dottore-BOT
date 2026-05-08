@@ -108,6 +108,9 @@ const targetChannelIds = new Set(config.discord.targetChannelIds);
 // 一人になったときの退出タイマー
 let aloneTimer = null;
 let listenCallback = null;
+// VC内の沈黙タイマー（一定時間発言がなければ自発発言）
+let vcIdleTimer = null;
+const VC_IDLE_MS = 8 * 60 * 1000; // 8分
 
 // ─── VC状態の永続化（再起動後に自動再参加するため）─────────────────────────
 const VC_STATE_PATH = path.join(__dirname, "vc-state.json");
@@ -126,10 +129,41 @@ function clearVCState() {
   } catch (_) {}
 }
 
+function clearVCIdleTimer() {
+  if (vcIdleTimer) { clearTimeout(vcIdleTimer); vcIdleTimer = null; }
+}
+
+function scheduleVCIdle() {
+  clearVCIdleTimer();
+  if (!vcHandler.isConnected()) return;
+  vcIdleTimer = setTimeout(async () => {
+    vcIdleTimer = null;
+    if (!vcHandler.isConnected()) return;
+    const msg = pick("vc_idle");
+    if (!msg) return;
+    const notifyChannelId = [...targetChannelIds][0];
+    if (!notifyChannelId) return;
+    try {
+      const ch = await client.channels.fetch(notifyChannelId);
+      if (ch?.isTextBased()) await ch.send(msg);
+    } catch (_) {}
+    scheduleVCIdle();
+  }, VC_IDLE_MS);
+}
+
 function makeListenCallback() {
   return async (speakerId, transcript) => {
     try {
+      // 15%の確率でスルー
+      if (Math.random() < 0.15) {
+        console.log(`[Bot] 音声入力スキップ [${speakerId}]`);
+        return;
+      }
+      // 0.5〜2秒のランダム遅延
+      const delay = 500 + Math.floor(Math.random() * 1500);
+      await new Promise((r) => setTimeout(r, delay));
       console.log(`[Bot] 音声入力 [${speakerId}]: ${transcript}`);
+      scheduleVCIdle();
       await vcHandler.respondToMessage(transcript);
     } catch (err) {
       console.error("[Bot] 音声応答エラー:", err.message);
@@ -149,6 +183,7 @@ async function autoRejoinVC() {
     if (joined) {
       listenCallback = makeListenCallback();
       vcHandler.startListening(listenCallback);
+      scheduleVCIdle();
       console.log(`[Bot] VC自動再参加完了: ${channel.name}`);
     } else {
       console.warn("[Bot] VC自動再参加失敗（権限または接続エラー）");
@@ -225,13 +260,29 @@ client.once("clientReady", async () => {
   await autoRejoinVC();
 });
 
-// ─── VC人数監視：一人になったら5秒後に退出 ───────────────────────────────
+// ─── VC人数監視：一人になったら5秒後に退出・参加者検知 ──────────────────
 client.on("voiceStateUpdate", (oldState, newState) => {
   if (!vcHandler.isConnected()) return;
 
   // Botが参加しているチャンネルを取得
   const botChannelId = oldState.guild.members.me?.voice?.channelId;
   if (!botChannelId) return;
+
+  // Bot以外が自分のVCに参加してきた場合
+  if (
+    !newState.member.user.bot &&
+    newState.channelId === botChannelId &&
+    oldState.channelId !== botChannelId
+  ) {
+    scheduleVCIdle();
+    const joinMsg = pick("vc_join");
+    const notifyChannelId = [...targetChannelIds][0];
+    if (joinMsg && notifyChannelId) {
+      client.channels.fetch(notifyChannelId)
+        .then((ch) => ch?.send(joinMsg))
+        .catch(() => {});
+    }
+  }
 
   const channel = oldState.guild.channels.cache.get(botChannelId);
   if (!channel) return;
@@ -250,6 +301,7 @@ client.on("voiceStateUpdate", (oldState, newState) => {
       const ch = oldState.guild.channels.cache.get(botChannelId);
       const stillAlone = ch?.members.filter((m) => !m.user.bot).size === 0;
       if (stillAlone) {
+        clearVCIdleTimer();
         vcHandler.leave();
         console.log("[Bot] 無人のため自動退出しました。");
         // テキストチャンネルに通知
@@ -333,6 +385,7 @@ client.on("messageCreate", async (message) => {
     if (joined) {
       listenCallback = makeListenCallback();
       vcHandler.startListening(listenCallback);
+      scheduleVCIdle();
       saveVCState(message.guild.id, targetVC.id);
       await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。声も聴いている。終わるなら \`!owari\` だ。`);
     } else {
@@ -369,6 +422,7 @@ client.on("messageCreate", async (message) => {
     case "!owari":
       if (!vcHandler.isConnected()) { await message.reply("……VCには入っていない。"); return; }
       if (aloneTimer) { clearTimeout(aloneTimer); aloneTimer = null; }
+      clearVCIdleTimer();
       listenCallback = null;
       vcHandler.leave();
       clearVCState();
