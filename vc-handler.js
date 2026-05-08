@@ -146,7 +146,7 @@ class VCHandler {
     this.player = null;
     this.isPlaying = false;
     this.vcAvailable = voiceLib !== null;
-    this._activeStreams = new Set();
+    this._activeStreams = new Map(); // userId -> { pcmChunks, opusStream, decoder }
     this._recentlyPlayed = false;
     this._transcriptCallback = null;
     this._speakingHandler = null;
@@ -429,20 +429,29 @@ ${soundList}
       if (this._activeStreams.size > 0) return;
       if (Date.now() - this._lastResponseTime < this._cooldownMs) return;
       if (!this._transcriptCallback) return;
-      this._activeStreams.add(userId);
 
+      const pcmChunks = [];
       const opusStream = receiver.subscribe(userId, {
-        end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
+        end: { behavior: EndBehaviorType.AfterSilence, duration: 3000 },
+      });
+      const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+
+      this._activeStreams.set(userId, { pcmChunks, opusStream, decoder });
+      opusStream.pipe(decoder);
+
+      decoder.on("data", (chunk) => {
+        const entry = this._activeStreams.get(userId);
+        if (entry) entry.pcmChunks.push(chunk);
       });
 
-      const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
-      const pcmChunks = [];
-
-      opusStream.pipe(decoder);
-      decoder.on("data", (chunk) => pcmChunks.push(chunk));
       decoder.on("end", async () => {
+        const entry = this._activeStreams.get(userId);
+        if (!entry) return;
+
         const MAX_PCM = 48000 * 2 * 2 * 30; // 30秒上限
-        let pcm = Buffer.concat(pcmChunks);
+        let pcm = Buffer.concat(entry.pcmChunks);
+        entry.pcmChunks.length = 0; // キャッシュを即時クリア
+
         if (pcm.length < 48000 * 2 * 2 * 0.5) {
           this._activeStreams.delete(userId);
           return;
@@ -467,8 +476,16 @@ ${soundList}
       });
 
       decoder.on("error", (err) => {
-        console.error("[VCHandler] Opusデコードエラー:", err.message);
-        opusStream.destroy();
+        if (err.message.includes("Invalid packet") || err.message.includes("Decode error")) {
+          // 無効パケットはスキップ。ストリームは継続する
+          return;
+        }
+        console.error("[VCHandler] Opusデコードエラー（致命的）:", err.message);
+        const entry = this._activeStreams.get(userId);
+        if (entry) {
+          entry.pcmChunks.length = 0;
+          try { entry.opusStream.destroy(); } catch (_) {}
+        }
         this._activeStreams.delete(userId);
       });
     };
@@ -484,6 +501,12 @@ ${soundList}
     }
     this._speakingHandler = null;
     this._transcriptCallback = null;
+
+    for (const [, entry] of this._activeStreams) {
+      entry.pcmChunks.length = 0;
+      try { entry.opusStream.destroy(); } catch (_) {}
+      try { entry.decoder.destroy(); } catch (_) {}
+    }
     this._activeStreams.clear();
   }
 
