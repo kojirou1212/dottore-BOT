@@ -439,12 +439,28 @@ ${soundList}
       this._activeStreams.set(userId, { pcmChunks, opusStream, decoder });
       opusStream.pipe(decoder);
 
+      // 'end'が発火せずdecoderが強制destroyされた場合のセーフネット
+      let streamDone = false;
+      const forceCleanup = () => {
+        if (streamDone) return;
+        streamDone = true;
+        const e = this._activeStreams.get(userId);
+        if (e) {
+          e.pcmChunks.length = 0;
+          try { e.opusStream.destroy(); } catch (_) {}
+        }
+        this._activeStreams.delete(userId);
+      };
+
       decoder.on("data", (chunk) => {
         const entry = this._activeStreams.get(userId);
         if (entry) entry.pcmChunks.push(chunk);
       });
 
       decoder.on("end", async () => {
+        if (streamDone) return;
+        streamDone = true; // 'close'のセーフネットより先にマーク
+
         const entry = this._activeStreams.get(userId);
         if (!entry) return;
 
@@ -475,9 +491,12 @@ ${soundList}
         }
       });
 
+      // 'end'なしでdecoderがdestroyされたとき（エラー後の自動破棄など）に発火
+      decoder.once("close", forceCleanup);
+
       decoder.on("error", (err) => {
         if (err.message.includes("Invalid packet") || err.message.includes("Decode error")) {
-          // 無効パケットはスキップ。ストリームは継続する
+          // 無効パケットはスキップ。destroyされた場合は'close'が後処理する
           return;
         }
         console.error("[VCHandler] Opusデコードエラー（致命的）:", err.message);
