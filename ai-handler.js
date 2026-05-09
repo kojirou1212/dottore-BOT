@@ -131,11 +131,14 @@ class AIHandler {
       }
 
       const candidate = data.candidates?.[0];
-      const text = candidate?.content?.parts?.[0]?.text?.trim();
+      const parts = candidate?.content?.parts ?? [];
+      // thought パーツ（thinking mode）を除いた最初のテキストパーツを取得
+      const textPart = parts.find((p) => !p.thought && typeof p.text === "string");
+      const text = textPart?.text?.trim();
 
       if (!text) {
         const finishReason = candidate?.finishReason ?? "UNKNOWN";
-        console.warn(`[AIHandler] 空応答 finishReason=${finishReason}`);
+        console.warn(`[AIHandler] 空応答 finishReason=${finishReason} parts=${JSON.stringify(parts.map(p => ({ thought: !!p.thought, textLen: p.text?.length ?? 0 })))}`);
         if (finishReason === "SAFETY") return "……(その話題には応答できない)";
         if (finishReason === "RECITATION") return "……(著作権の都合で応答できない)";
         throw new Error(`AIからの応答が空でした。(finishReason=${finishReason})`);

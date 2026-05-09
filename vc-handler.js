@@ -304,7 +304,8 @@ ${soundList}
 
     const parseResponse = (data) => {
       const candidate = data.candidates?.[0];
-      const raw = (candidate?.content?.parts?.[0]?.text ?? "").trim();
+      const parts = candidate?.content?.parts ?? [];
+      const raw = (parts.find((p) => !p.thought && typeof p.text === "string")?.text ?? "").trim();
       console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"} / AI生応答: "${raw}"`);
 
       const [indexPart, thought = ""] = raw.split("|");
@@ -566,7 +567,8 @@ ${soundList}
         }
         throw new Error(`STT API error: ${msg}`);
       }
-      return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+      const parts = data.candidates?.[0]?.content?.parts ?? [];
+      return parts.find((p) => !p.thought && typeof p.text === "string")?.text?.trim() ?? null;
     };
 
     const primaryModel = this.config.gemini.model;

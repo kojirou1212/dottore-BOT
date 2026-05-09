@@ -511,11 +511,18 @@ client.on("messageCreate", async (message) => {
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const reply = await aiHandler.generateResponse(userId, content);
-    if (reply.length <= 2000) {
-      await message.reply(reply);
-    } else {
-      const chunks = splitMessage(reply, 2000);
-      for (const chunk of chunks) await message.channel.send(chunk);
+    const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        if (i === 0) {
+          await message.reply(chunks[i]);
+        } else {
+          await message.channel.send(chunks[i]);
+        }
+      } catch (sendErr) {
+        console.error(`[Bot] reply失敗、channel.sendで再試行: ${sendErr.message}`);
+        await message.channel.send(chunks[i]);
+      }
     }
     console.log(`[Bot] 返答送信完了 [${userTag}]`);
 
@@ -527,7 +534,11 @@ client.on("messageCreate", async (message) => {
     }
   } catch (error) {
     console.error(`[Bot] エラー [${userTag}]:`, error.message);
-    await message.reply(config.ai.errorMessage);
+    try {
+      await message.reply(config.ai.errorMessage);
+    } catch (_) {
+      await message.channel.send(config.ai.errorMessage).catch(() => {});
+    }
   }
 });
 
