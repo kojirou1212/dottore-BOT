@@ -405,7 +405,7 @@ client.on("messageCreate", async (message) => {
       await message.reply("……何か言え。`!hakase [メッセージ]` の形式で使え。");
       return;
     }
-    if (config.ai.typingIndicator) await message.channel.sendTyping();
+    if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const result = await vcHandler.respondToMessage(userText);
     if (result) {
       const names = result.sounds.map(s => s.name).join("、");
@@ -498,9 +498,9 @@ client.on("messageCreate", async (message) => {
 
   // ── AI 応答 ───────────────────────────────────────────────────
   console.log(`[Bot] メッセージ受信 [${userTag}]: ${content.slice(0, 80)}`);
-  if (config.ai.typingIndicator) await message.channel.sendTyping();
 
   try {
+    if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const reply = await aiHandler.generateResponse(userId, content);
     if (reply.length <= 2000) {
       await message.reply(reply);

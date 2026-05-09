@@ -111,7 +111,12 @@ class AIHandler {
         history: chatHistory,
       });
 
-      const response = await chat.sendMessage({ message: userMessage });
+      const response = await Promise.race([
+        chat.sendMessage({ message: userMessage }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("AI応答タイムアウト (30s)")), 30000)
+        ),
+      ]);
 
       const text = typeof response.text === "function"
         ? response.text()
