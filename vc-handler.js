@@ -64,6 +64,9 @@ function pcmToWav(pcmBuffer, sampleRate = 48000, channels = 2, bitDepth = 16) {
   return Buffer.concat([header, pcmBuffer]);
 }
 
+// ① 独り言に適した短めのサウンド名リスト
+const MUTTER_SOUND_NAMES = ["溜息", "ふ…", "ふん", "笑い声3", "ん？"];
+
 // ── サウンドボード定義 ────────────────────────────────────────────────────
 const SOUND_BOARD = [
   { name: "いや、ないだろう",         file: "いや、ないだろう.mp3",               tags: ["否定", "反論", "ありえない", "驚き"] },
@@ -281,7 +284,7 @@ ${soundList}
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
-            maxOutputTokens: 500,
+            maxOutputTokens: 30,
             thinkingConfig: { thinkingBudget: 0 },
           },
         }),
@@ -345,6 +348,18 @@ ${soundList}
     return SOUND_BOARD[Math.floor(Math.random() * SOUND_BOARD.length)];
   }
 
+  // ① 独り言用：短くて自然なサウンドをランダム選択
+  mutter() {
+    const candidates = SOUND_BOARD.filter((s) => MUTTER_SOUND_NAMES.includes(s.name));
+    if (candidates.length === 0) return this._randomFallback();
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  async playMutter() {
+    if (!this.isConnected()) return false;
+    return this.playSound(this.mutter());
+  }
+
   // ── 音声ファイルの再生 ────────────────────────────────────────────────────
   async playSound(soundEntry) {
     if (!this.vcAvailable || !this.player) {
@@ -396,6 +411,18 @@ ${soundList}
       const played = await this.playSound(sound);
       if (played) results.push(sound);
     }
+
+    // ④ 二連反応：15%の確率で短い間を置いてもう一音
+    if (results.length > 0 && Math.random() < 0.15) {
+      await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
+      const extra = this.mutter();
+      const played = await this.playSound(extra);
+      if (played) {
+        results.push(extra);
+        console.log(`[VCHandler] 二連反応: ${extra.name}`);
+      }
+    }
+
     if (results.length > 0) return { sounds: results, thought };
 
     const silent = SOUND_BOARD.find((s) => s.file === "無音.mp3");
@@ -433,7 +460,7 @@ ${soundList}
 
       const pcmChunks = [];
       const opusStream = receiver.subscribe(userId, {
-        end: { behavior: EndBehaviorType.AfterSilence, duration: 3000 },
+        end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
       });
       const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
 
