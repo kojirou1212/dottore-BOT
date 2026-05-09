@@ -1,10 +1,7 @@
 // ai-handler.js
-const { GoogleGenAI } = require("@google/genai");
-
 class AIHandler {
   constructor(config) {
     this.config = config;
-    this.ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     this.conversationHistory = new Map();
   }
 
@@ -97,36 +94,48 @@ class AIHandler {
 
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
     const systemPromptWithTime = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}`;
-
     const chatHistory = history.slice(0, -1);
+    const apiKey = this.config.gemini.apiKey;
 
-    const tryModel = async (model) => {
-      const chat = this.ai.chats.create({
-        model,
-        config: {
-          systemInstruction: systemPromptWithTime,
-          maxOutputTokens: this.config.gemini.maxTokens,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-        history: chatHistory,
-      });
+    const callGemini = async (model) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemPromptWithTime }] },
+            contents: [...chatHistory, { role: "user", parts: [{ text: userMessage }] }],
+            generationConfig: {
+              maxOutputTokens: this.config.gemini.maxTokens,
+              thinkingConfig: { thinkingBudget: 0 },
+            },
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
-      const response = await Promise.race([
-        chat.sendMessage({ message: userMessage }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("AI応答タイムアウト (30s)")), 30000)
-        ),
-      ]);
+      const data = await res.json();
+      if (data.error) {
+        const code = data.error.code;
+        const msg = data.error.message ?? "";
+        if (code === 503 || msg.includes("high demand") || msg.includes("UNAVAILABLE")) {
+          throw new Error(`503: ${msg}`);
+        }
+        throw new Error(`API error ${code}: ${msg}`);
+      }
 
-      const text = typeof response.text === "function"
-        ? response.text()
-        : response.text;
+      const candidate = data.candidates?.[0];
+      const text = candidate?.content?.parts?.[0]?.text?.trim();
 
-      if (!text || text.trim() === "") {
-        const candidate = response.candidates?.[0];
+      if (!text) {
         const finishReason = candidate?.finishReason ?? "UNKNOWN";
         console.warn(`[AIHandler] 空応答 finishReason=${finishReason}`);
-
         if (finishReason === "SAFETY") return "……(その話題には応答できない)";
         if (finishReason === "RECITATION") return "……(著作権の都合で応答できない)";
         throw new Error(`AIからの応答が空でした。(finishReason=${finishReason})`);
@@ -136,11 +145,10 @@ class AIHandler {
     };
 
     try {
-      const primaryModel = this.config.gemini.model;
       let assistantMessage;
 
       try {
-        assistantMessage = await this._callWithRetry(() => tryModel(primaryModel));
+        assistantMessage = await this._callWithRetry(() => callGemini(this.config.gemini.model));
       } catch (primaryErr) {
         const msg = primaryErr.message || "";
         const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand");
@@ -148,7 +156,7 @@ class AIHandler {
 
         if (isUnavailable && fallbackModel) {
           console.warn(`[AIHandler] プライマリモデル失敗。フォールバック: ${fallbackModel}`);
-          assistantMessage = await this._callWithRetry(() => tryModel(fallbackModel));
+          assistantMessage = await this._callWithRetry(() => callGemini(fallbackModel));
         } else {
           throw primaryErr;
         }
@@ -161,7 +169,7 @@ class AIHandler {
       if (history.length > 0 && history[history.length - 1].role === "user") {
         history.pop();
       }
-      console.error(`[AIHandler] API error for user ${userId}:`, JSON.stringify(error.message));
+      console.error(`[AIHandler] API error for user ${userId}:`, error.message);
       throw error;
     }
   }
