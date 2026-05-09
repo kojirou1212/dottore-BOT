@@ -263,14 +263,15 @@ client.once("clientReady", async () => {
 // ─── VC人数監視：一人になったら5秒後に退出・参加者検知 ──────────────────
 client.on("voiceStateUpdate", (oldState, newState) => {
   if (!vcHandler.isConnected()) return;
+  // Bot自身のVC状態変化は無視（起動時の自動再参加で誤判定しないため）
+  if (newState.member.user.bot) return;
 
   // Botが参加しているチャンネルを取得
   const botChannelId = oldState.guild.members.me?.voice?.channelId;
   if (!botChannelId) return;
 
-  // Bot以外が自分のVCに参加してきた場合
+  // 人間が自分のVCに参加してきた場合
   if (
-    !newState.member.user.bot &&
     newState.channelId === botChannelId &&
     oldState.channelId !== botChannelId
   ) {
