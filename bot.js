@@ -179,6 +179,13 @@ async function autoRejoinVC() {
     if (!guild) { clearVCState(); return; }
     const channel = await guild.channels.fetch(channelId).catch(() => null);
     if (!channel || !channel.isVoiceBased()) { clearVCState(); return; }
+    // 誰もいないVCには再参加しない
+    const humanCount = channel.members?.filter((m) => !m.user.bot).size ?? 0;
+    if (humanCount === 0) {
+      console.log("[Bot] VC自動再参加スキップ：誰もいません");
+      clearVCState();
+      return;
+    }
     const joined = await vcHandler.join(channel);
     if (joined) {
       listenCallback = makeListenCallback();
@@ -304,6 +311,7 @@ client.on("voiceStateUpdate", (oldState, newState) => {
       if (stillAlone) {
         clearVCIdleTimer();
         vcHandler.leave();
+        clearVCState();
         console.log("[Bot] 無人のため自動退出しました。");
         // テキストチャンネルに通知
         const notifyChannelId = [...targetChannelIds][0];
