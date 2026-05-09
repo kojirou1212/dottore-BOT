@@ -117,14 +117,20 @@ let currentVCChannel = null;  // 現在接続中のVCチャンネル参照
 let sessionStartTime = null;  // セッション開始時刻（疲労計算用）
 let mutterTimer = null;       // ランダム独り言タイマー
 
-// ② 疲労ベースのスキップ率（長時間ほど無口になる）
-function getSkipRate() {
-  if (!sessionStartTime) return 0.15;
-  const min = (Date.now() - sessionStartTime) / 60000;
-  if (min < 30) return 0.15;
-  if (min < 60) return 0.25;
-  if (min < 90) return 0.35;
-  return 0.40;
+// ② 疲労ベースのスキップ率（長時間・大人数ほど無口になる）
+function getSkipRate(humanCount) {
+  let base = 0.15;
+  if (sessionStartTime) {
+    const min = (Date.now() - sessionStartTime) / 60000;
+    if (min >= 90) base = 0.40;
+    else if (min >= 60) base = 0.35;
+    else if (min >= 30) base = 0.25;
+  }
+  // 大人数ほど応答しなくなる
+  const count = humanCount ?? 1;
+  if (count >= 5) base = Math.min(base + 0.30, 0.80);
+  else if (count >= 3) base = Math.min(base + 0.15, 0.65);
+  return base;
 }
 
 // ③ キーワード（名前を呼ばれたら必ず反応）
@@ -292,8 +298,10 @@ function makeListenCallback() {
       );
 
       // ② 疲労ベーススキップ（キーワードありは免除）
-      if (!hasKeyword && Math.random() < getSkipRate()) {
-        console.log(`[Bot] 音声入力スキップ [${speakerId}] skipRate=${Math.round(getSkipRate() * 100)}%`);
+      const humanCount = currentVCChannel?.members?.filter((m) => !m.user.bot).size ?? 1;
+      const currentSkipRate = getSkipRate(humanCount);
+      if (!hasKeyword && Math.random() < currentSkipRate) {
+        console.log(`[Bot] 音声入力スキップ [${speakerId}] humanCount=${humanCount} skipRate=${Math.round(currentSkipRate * 100)}%`);
         return;
       }
 
@@ -427,26 +435,35 @@ client.on("voiceStateUpdate", (oldState, newState) => {
   const botChannelId = oldState.guild.members.me?.voice?.channelId;
   if (!botChannelId) return;
 
+  const channel = oldState.guild.channels.cache.get(botChannelId);
+  if (!channel) return;
+
+  // Bot以外のメンバー数をカウント
+  const humanCount = channel.members.filter((m) => !m.user.bot).size;
+
   // 人間が自分のVCに参加してきた場合
   if (
     newState.channelId === botChannelId &&
     oldState.channelId !== botChannelId
   ) {
     scheduleVCIdle();
-    const joinMsg = pick("vc_join");
     const notifyChannelId = [...targetChannelIds][0];
-    if (joinMsg && notifyChannelId) {
-      client.channels.fetch(notifyChannelId)
-        .then((ch) => ch?.send(joinMsg))
-        .catch(() => {});
+    if (notifyChannelId) {
+      let reactMsg;
+      if (humanCount >= 5) {
+        reactMsg = pick("vc_crowd_heavy") || "……これ以上増えるなら退出する。";
+      } else if (humanCount >= 3) {
+        reactMsg = pick("vc_crowd_mild") || "……増えたか。管理が煩雑になる。";
+      } else {
+        reactMsg = pick("vc_join");
+      }
+      if (reactMsg) {
+        client.channels.fetch(notifyChannelId)
+          .then((ch) => ch?.send(reactMsg))
+          .catch(() => {});
+      }
     }
   }
-
-  const channel = oldState.guild.channels.cache.get(botChannelId);
-  if (!channel) return;
-
-  // Bot以外のメンバー数をカウント
-  const humanCount = channel.members.filter((m) => !m.user.bot).size;
 
   if (humanCount === 0) {
     // 一人（Bot以外いない）→ 5秒後に退出
