@@ -116,8 +116,26 @@ const VC_IDLE_MS = 8 * 60 * 1000; // 8分
 let currentVCChannel = null;  // 現在接続中のVCチャンネル参照
 let sessionStartTime = null;  // セッション開始時刻（疲労計算用）
 let mutterTimer = null;       // ランダム独り言タイマー
+let dailyMood = null;         // ④⑤ 日替わり機嫌 'good'|'neutral'|'bad'
+let isFocused = false;        // ① 集中モード中フラグ
+let focusTimer = null;        // ① 集中モードタイマー
+const recentSpeakers = new Map(); // ② 連続発言追跡 userId→{count, lastTime}
+const userJoinTimes = new Map();  // ⑥ 長居追跡 userId→joinTimestamp
+let longStayTimer = null;     // ⑥ 長居チェック定期タイマー
 
-// ② 疲労ベースのスキップ率（長時間・大人数ほど無口になる）
+function getJSTHour() {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
+}
+
+function resetDailyMood() {
+  const r = Math.random();
+  if (r < 0.25) dailyMood = "good";
+  else if (r < 0.65) dailyMood = "neutral";
+  else dailyMood = "bad";
+  console.log(`[Bot] 日替わり機嫌: ${dailyMood}`);
+}
+
+// ②④⑤ スキップ率（疲労・人数・時間帯・機嫌を合算）
 function getSkipRate(humanCount) {
   let base = 0.15;
   if (sessionStartTime) {
@@ -130,13 +148,32 @@ function getSkipRate(humanCount) {
   const count = humanCount ?? 1;
   if (count >= 5) base = Math.min(base + 0.30, 0.80);
   else if (count >= 3) base = Math.min(base + 0.15, 0.65);
+  // 時間帯補正（深夜は機嫌良い・反応増、朝は機嫌悪い・反応減）
+  const hour = getJSTHour();
+  if (hour >= 23 || hour < 2) base = Math.max(base - 0.10, 0.05);
+  else if (hour >= 6 && hour < 10) base = Math.min(base + 0.10, 0.85);
+  // 日替わり機嫌補正
+  if (dailyMood === "good") base = Math.max(base - 0.08, 0.05);
+  else if (dailyMood === "bad") base = Math.min(base + 0.08, 0.85);
   return base;
 }
 
 // ③ キーワード（名前を呼ばれたら必ず反応）
 const TRIGGER_KEYWORDS = ["ドットーレ", "博士", "ハカセ", "dottore"];
 
-// ① ランダム独り言（3〜7分おきに自発的に音を鳴らす）
+// ④⑤ 時間帯と機嫌に応じた独り言間隔（深夜短め・朝長め）
+function getMutterDelayMs() {
+  const hour = getJSTHour();
+  let minMin, maxMin;
+  if (hour >= 23 || hour < 2)       { minMin = 2; maxMin = 5;  }  // 深夜：賑やか
+  else if (hour >= 6 && hour < 10)  { minMin = 5; maxMin = 12; }  // 朝：無口
+  else                               { minMin = 3; maxMin = 7;  }  // 通常
+  if (dailyMood === "good") { minMin = Math.max(1, minMin - 1); maxMin = Math.max(3, maxMin - 2); }
+  else if (dailyMood === "bad")  { minMin += 2; maxMin += 3; }
+  return (minMin + Math.random() * (maxMin - minMin)) * 60 * 1000;
+}
+
+// ① ランダム独り言（自発的に音を鳴らす）
 function clearMutterTimer() {
   if (mutterTimer) { clearTimeout(mutterTimer); mutterTimer = null; }
 }
@@ -144,7 +181,7 @@ function clearMutterTimer() {
 function scheduleMutter() {
   clearMutterTimer();
   if (!vcHandler.isConnected()) return;
-  const delayMs = (3 + Math.random() * 4) * 60 * 1000; // 3〜7分
+  const delayMs = getMutterDelayMs();
   mutterTimer = setTimeout(async () => {
     mutterTimer = null;
     if (!vcHandler.isConnected()) return;
@@ -164,6 +201,42 @@ function scheduleMutter() {
       }
     }
     scheduleMutter(); // 次の独り言をスケジュール
+  }, delayMs);
+}
+
+// ─── ① 集中モード ─────────────────────────────────────────────────────────
+function clearFocusTimer() {
+  if (focusTimer) { clearTimeout(focusTimer); focusTimer = null; }
+}
+
+async function doFocusMode() {
+  if (isFocused || !vcHandler.isConnected()) return;
+  isFocused = true;
+  clearMutterTimer();
+  const notifyChannelId = [...targetChannelIds][0];
+  if (notifyChannelId) {
+    const msg = pick("vc_focus_start") || "（実験が佳境に入っている）";
+    client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
+  }
+  console.log("[Bot] 集中モード開始");
+  const durationMs = (5 + Math.random() * 5) * 60 * 1000; // 5〜10分
+  focusTimer = setTimeout(() => {
+    focusTimer = null;
+    isFocused = false;
+    if (vcHandler.isConnected()) { scheduleMutter(); scheduleFocusMode(); }
+    console.log("[Bot] 集中モード終了");
+  }, durationMs);
+}
+
+function scheduleFocusMode() {
+  clearFocusTimer();
+  if (!vcHandler.isConnected() || isFocused) return;
+  const delayMs = (15 + Math.random() * 30) * 60 * 1000; // 15〜45分後に判定
+  focusTimer = setTimeout(async () => {
+    focusTimer = null;
+    if (!vcHandler.isConnected() || isFocused) return;
+    if (Math.random() > 0.25) { scheduleFocusMode(); return; } // 25%の確率で発動
+    await doFocusMode();
   }, delayMs);
 }
 
@@ -195,6 +268,9 @@ async function doTempLeave() {
   isTemporarilyAway = true;
   clearVCIdleTimer();
   clearMutterTimer();
+  clearFocusTimer();
+  isFocused = false;
+  clearLongStayTimer();
 
   vcHandler.leave(); // vc-state.json は保持（戻るため）
 
@@ -231,6 +307,10 @@ async function doTempReturn() {
       scheduleVCIdle();
       scheduleMutter();
       scheduleTempLeave();
+      scheduleFocusMode();
+      const now = Date.now();
+      fresh.members.forEach((m) => { if (!m.user.bot && !userJoinTimes.has(m.id)) userJoinTimes.set(m.id, now); });
+      scheduleLongStayCheck();
       const notifyChannelId = [...targetChannelIds][0];
       if (notifyChannelId) {
         const msg = pick("vc_return") || "……戻った。";
@@ -248,6 +328,32 @@ async function doTempReturn() {
   } finally {
     isTemporarilyAway = false;
   }
+}
+
+// ─── ⑥ 長居ユーザーへの言及 ───────────────────────────────────────────────
+function clearLongStayTimer() {
+  if (longStayTimer) { clearInterval(longStayTimer); longStayTimer = null; }
+}
+
+function scheduleLongStayCheck() {
+  clearLongStayTimer();
+  if (!vcHandler.isConnected()) return;
+  longStayTimer = setInterval(async () => {
+    if (!vcHandler.isConnected()) return;
+    const now = Date.now();
+    const notifyChannelId = [...targetChannelIds][0];
+    if (!notifyChannelId) return;
+    for (const [userId, joinTime] of userJoinTimes) {
+      const stayMin = (now - joinTime) / 60000;
+      if (stayMin >= 60 && Math.random() < 0.20) {
+        const msg = pick("vc_long_stay") || "……まだいるのか。粘るな。";
+        const ch = await client.channels.fetch(notifyChannelId).catch(() => null);
+        if (ch) await ch.send(msg).catch(() => {});
+        userJoinTimes.set(userId, now); // 次の1時間をリセット
+        break; // 1回のチェックで1件だけ送信
+      }
+    }
+  }, 15 * 60 * 1000); // 15分ごとにチェック
 }
 
 // ─── VC状態の永続化（再起動後に自動再参加するため）─────────────────────────
@@ -292,14 +398,45 @@ function scheduleVCIdle() {
 function makeListenCallback() {
   return async (speakerId, transcript) => {
     try {
-      // ③ キーワード検出（名前を呼ばれたら必ず反応・遅延最小化）
+      // ① 集中モード中は完全スキップ
+      if (isFocused) {
+        console.log(`[Bot] 集中モード中スキップ [${speakerId}]`);
+        return;
+      }
+
+      // キーワード検出（名前を呼ばれたら必ず反応・遅延最小化）
       const hasKeyword = TRIGGER_KEYWORDS.some((kw) =>
         transcript.toLowerCase().includes(kw.toLowerCase())
       );
 
-      // ② 疲労ベーススキップ（キーワードありは免除）
       const humanCount = currentVCChannel?.members?.filter((m) => !m.user.bot).size ?? 1;
       const currentSkipRate = getSkipRate(humanCount);
+
+      // ② 連続発言チェック（キーワードありは免除）
+      if (!hasKeyword) {
+        const now = Date.now();
+        const speaker = recentSpeakers.get(speakerId) ?? { count: 0, lastTime: 0 };
+        speaker.count = (now - speaker.lastTime < 2 * 60 * 1000) ? speaker.count + 1 : 1;
+        speaker.lastTime = now;
+        recentSpeakers.set(speakerId, speaker);
+
+        if (speaker.count >= 4) {
+          const spamRate = Math.min(currentSkipRate + 0.30, 0.90);
+          if (Math.random() < spamRate) {
+            if (Math.random() < 0.25) {
+              const notifyChannelId = [...targetChannelIds][0];
+              const msg = pick("vc_spam") || "……うるさい。少し黙れ。";
+              if (notifyChannelId) {
+                client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
+              }
+            }
+            console.log(`[Bot] 連続発言スキップ [${speakerId}] count=${speaker.count}`);
+            return;
+          }
+        }
+      }
+
+      // 疲労・人数・時間帯・機嫌によるスキップ（キーワードありは免除）
       if (!hasKeyword && Math.random() < currentSkipRate) {
         console.log(`[Bot] 音声入力スキップ [${speakerId}] humanCount=${humanCount} skipRate=${Math.round(currentSkipRate * 100)}%`);
         return;
@@ -349,6 +486,10 @@ async function autoRejoinVC() {
       sessionStartTime = Date.now();
       scheduleMutter();
       scheduleTempLeave();
+      scheduleFocusMode();
+      const now = Date.now();
+      channel.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
+      scheduleLongStayCheck();
       console.log(`[Bot] VC自動再参加完了: ${channel.name}`);
     } else {
       console.warn("[Bot] VC自動再参加失敗（権限または接続エラー）");
@@ -395,6 +536,7 @@ function startScheduler() {
     if (hour === 4) {
       console.log("[Scheduler] 定期履歴クリア (04:00 JST)");
       aiHandler.clearAllHistory();
+      resetDailyMood();
       return;
     }
 
@@ -421,15 +563,54 @@ client.once("clientReady", async () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
   console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
+  resetDailyMood();
   startScheduler();
   await autoRejoinVC();
 });
 
 // ─── VC人数監視：一人になったら5秒後に退出・参加者検知 ──────────────────
-client.on("voiceStateUpdate", (oldState, newState) => {
-  if (!vcHandler.isConnected()) return;
+client.on("voiceStateUpdate", async (oldState, newState) => {
   // Bot自身のVC状態変化は無視（起動時の自動再参加で誤判定しないため）
-  if (newState.member.user.bot) return;
+  if (newState.member?.user?.bot) return;
+
+  // 自動参加：ボット未接続時、誰かがVCに入ったら確率で参加
+  if (!vcHandler.isConnected() && !isTemporarilyAway) {
+    if (newState.channelId && newState.channelId !== oldState.channelId) {
+      const targetCh = newState.channel;
+      if (targetCh?.isVoiceBased() && Math.random() < 0.35) {
+        const waitMs = 2000 + Math.random() * 3000; // 2〜5秒後に自然に参加
+        setTimeout(async () => {
+          if (vcHandler.isConnected() || isTemporarilyAway) return;
+          const freshCh = await newState.guild.channels.fetch(targetCh.id).catch(() => null);
+          const humans = freshCh?.members?.filter((m) => !m.user.bot).size ?? 0;
+          if (humans === 0) return; // 待機中に誰もいなくなっていたら中止
+          const joined = await vcHandler.join(freshCh).catch(() => false);
+          if (!joined) return;
+          listenCallback = makeListenCallback();
+          vcHandler.startListening(listenCallback);
+          scheduleVCIdle();
+          currentVCChannel = freshCh;
+          sessionStartTime = Date.now();
+          scheduleMutter();
+          scheduleTempLeave();
+          scheduleFocusMode();
+          const now = Date.now();
+          freshCh.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
+          scheduleLongStayCheck();
+          saveVCState(newState.guild.id, freshCh.id);
+          const notifyChannelId = [...targetChannelIds][0];
+          if (notifyChannelId) {
+            const msg = pick("vc_autojoin") || "……気が向いた。観察を開始する。";
+            client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
+          }
+          console.log(`[Bot] 自動参加: ${freshCh.name}`);
+        }, waitMs);
+      }
+    }
+    return;
+  }
+
+  if (!vcHandler.isConnected()) return;
 
   // Botが参加しているチャンネルを取得
   const botChannelId = oldState.guild.members.me?.voice?.channelId;
@@ -446,6 +627,7 @@ client.on("voiceStateUpdate", (oldState, newState) => {
     newState.channelId === botChannelId &&
     oldState.channelId !== botChannelId
   ) {
+    userJoinTimes.set(newState.member.id, Date.now()); // ⑥ 参加時刻を記録
     scheduleVCIdle();
     const notifyChannelId = [...targetChannelIds][0];
     if (notifyChannelId) {
@@ -465,6 +647,21 @@ client.on("voiceStateUpdate", (oldState, newState) => {
     }
   }
 
+  // ③ 人間が自分のVCから退出した場合
+  if (
+    oldState.channelId === botChannelId &&
+    newState.channelId !== botChannelId
+  ) {
+    userJoinTimes.delete(oldState.member.id); // ⑥ 退出で削除
+    if (humanCount > 0 && Math.random() < 0.40) { // まだ誰かいる場合のみ反応
+      const notifyChannelId = [...targetChannelIds][0];
+      const msg = pick("vc_leave");
+      if (msg && notifyChannelId) {
+        client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
+      }
+    }
+  }
+
   if (humanCount === 0) {
     // 一人（Bot以外いない）→ 5秒後に退出
     if (aloneTimer) return; // すでにタイマー起動中
@@ -479,7 +676,12 @@ client.on("voiceStateUpdate", (oldState, newState) => {
         clearVCIdleTimer();
         clearMutterTimer();
         clearTempLeaveTimer();
+        clearFocusTimer();
+        clearLongStayTimer();
         isTemporarilyAway = false;
+        isFocused = false;
+        recentSpeakers.clear();
+        userJoinTimes.clear();
         currentVCChannel = null;
         sessionStartTime = null;
         vcHandler.leave();
@@ -571,6 +773,10 @@ client.on("messageCreate", async (message) => {
       sessionStartTime = Date.now();
       scheduleMutter();
       scheduleTempLeave();
+      scheduleFocusMode();
+      const now = Date.now();
+      targetVC.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
+      scheduleLongStayCheck();
       saveVCState(message.guild.id, targetVC.id);
       await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。声も聴いている。終わるなら \`!owari\` だ。`);
     } else {
@@ -610,7 +816,12 @@ client.on("messageCreate", async (message) => {
       clearVCIdleTimer();
       clearMutterTimer();
       clearTempLeaveTimer();
+      clearFocusTimer();
+      clearLongStayTimer();
       isTemporarilyAway = false;
+      isFocused = false;
+      recentSpeakers.clear();
+      userJoinTimes.clear();
       currentVCChannel = null;
       sessionStartTime = null;
       listenCallback = null;
