@@ -122,6 +122,8 @@ let focusTimer = null;        // ① 集中モードタイマー
 const recentSpeakers = new Map(); // ② 連続発言追跡 userId→{count, lastTime}
 const userJoinTimes = new Map();  // ⑥ 長居追跡 userId→joinTimestamp
 let longStayTimer = null;     // ⑥ 長居チェック定期タイマー
+const userResponseTrack = new Map(); // 同一応答追跡 userId→{text, count, firstTime}
+const ignoredUsers = new Map();      // 一時無視 userId→ignoreUntilTimestamp
 
 function getJSTHour() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
@@ -404,6 +406,17 @@ function makeListenCallback() {
         return;
       }
 
+      // 気のせいかモード：一時無視中なら完全スキップ
+      const ignoreUntil = ignoredUsers.get(speakerId);
+      if (ignoreUntil) {
+        if (Date.now() < ignoreUntil) {
+          console.log(`[Bot] 一時無視中 [${speakerId}]`);
+          return;
+        }
+        ignoredUsers.delete(speakerId);
+        userResponseTrack.delete(speakerId);
+      }
+
       // キーワード検出（名前を呼ばれたら必ず反応・遅延最小化）
       const hasKeyword = TRIGGER_KEYWORDS.some((kw) =>
         transcript.toLowerCase().includes(kw.toLowerCase())
@@ -455,7 +468,30 @@ function makeListenCallback() {
       }
 
       scheduleVCIdle();
-      await vcHandler.respondToMessage(transcript);
+      const responseResult = await vcHandler.respondToMessage(transcript);
+
+      // 同一応答リピート検出（2分間に3回同じ応答→気のせいかモード）
+      if (responseResult) {
+        const responseKey = responseResult.sounds?.map((s) => s.name).join(",") ?? "";
+        const now = Date.now();
+        const prev = userResponseTrack.get(speakerId);
+        if (prev && prev.text === responseKey && now - prev.firstTime < 2 * 60 * 1000) {
+          prev.count++;
+          if (prev.count >= 3) {
+            const ignoreMs = (3 + Math.random() * 7) * 60 * 1000; // 3〜10分無視
+            ignoredUsers.set(speakerId, Date.now() + ignoreMs);
+            userResponseTrack.delete(speakerId);
+            const notifyChannelId = [...targetChannelIds][0];
+            const msg = pick("vc_kinoseikas") || "……気のせいか。";
+            if (notifyChannelId) {
+              client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
+            }
+            console.log(`[Bot] 気のせいかモード [${speakerId}] ${Math.round(ignoreMs / 60000)}分無視`);
+          }
+        } else {
+          userResponseTrack.set(speakerId, { text: responseKey, count: 1, firstTime: Date.now() });
+        }
+      }
     } catch (err) {
       console.error("[Bot] 音声応答エラー:", err.message);
     }
@@ -682,6 +718,8 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         isFocused = false;
         recentSpeakers.clear();
         userJoinTimes.clear();
+        userResponseTrack.clear();
+        ignoredUsers.clear();
         currentVCChannel = null;
         sessionStartTime = null;
         vcHandler.leave();
@@ -822,6 +860,8 @@ client.on("messageCreate", async (message) => {
       isFocused = false;
       recentSpeakers.clear();
       userJoinTimes.clear();
+      userResponseTrack.clear();
+      ignoredUsers.clear();
       currentVCChannel = null;
       sessionStartTime = null;
       listenCallback = null;
