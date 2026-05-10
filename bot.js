@@ -250,17 +250,20 @@ function clearTempLeaveTimer() {
   if (tempLeaveTimer) { clearTimeout(tempLeaveTimer); tempLeaveTimer = null; }
 }
 
-function scheduleTempLeave() {
+function scheduleTempLeave(capricious = false) {
   clearTempLeaveTimer();
   if (!vcHandler.isConnected()) return;
-  // 20〜40分後に30%の確率で途中退席
-  const delayMs = (20 + Math.random() * 20) * 60 * 1000;
+  // 気まま（自動参加）: 10〜25分後に55%の確率 / 通常: 20〜40分後に30%の確率
+  const delayMs = capricious
+    ? (10 + Math.random() * 15) * 60 * 1000
+    : (20 + Math.random() * 20) * 60 * 1000;
+  const leaveRate = capricious ? 0.55 : 0.30;
   tempLeaveTimer = setTimeout(async () => {
     tempLeaveTimer = null;
     if (!vcHandler.isConnected() || isTemporarilyAway) return;
     const humanCount = currentVCChannel?.members?.filter((m) => !m.user.bot).size ?? 0;
-    if (humanCount === 0) { scheduleTempLeave(); return; }
-    if (Math.random() > 0.30) { scheduleTempLeave(); return; }
+    if (humanCount === 0) { scheduleTempLeave(capricious); return; }
+    if (Math.random() > leaveRate) { scheduleTempLeave(capricious); return; }
     await doTempLeave();
   }, delayMs);
 }
@@ -628,7 +631,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
           currentVCChannel = freshCh;
           sessionStartTime = Date.now();
           scheduleMutter();
-          scheduleTempLeave();
+          scheduleTempLeave(true); // 気まま：離席確率・間隔を高く
           scheduleFocusMode();
           const now = Date.now();
           freshCh.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
