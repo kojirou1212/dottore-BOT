@@ -110,7 +110,7 @@ let aloneTimer = null;
 let listenCallback = null;
 // VC内の沈黙タイマー（一定時間発言がなければ自発発言）
 let vcIdleTimer = null;
-const VC_IDLE_MS = 8 * 60 * 1000; // 8分
+const VC_IDLE_MS = 25 * 60 * 1000; // 25分（長時間滞在者は無音が普通）
 
 // ─── VC セッション管理 ────────────────────────────────────────────────────
 let currentVCChannel = null;  // 現在接続中のVCチャンネル参照
@@ -124,6 +124,7 @@ const userJoinTimes = new Map();  // ⑥ 長居追跡 userId→joinTimestamp
 let longStayTimer = null;     // ⑥ 長居チェック定期タイマー
 const userResponseTrack = new Map(); // 同一応答追跡 userId→{text, count, firstTime}
 const ignoredUsers = new Map();      // 一時無視 userId→ignoreUntilTimestamp
+const sessionLeavers = new Map();    // 今セッション中に退出したユーザーID（再入室検知用）userId→leaveTimestamp
 
 function getJSTHour() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
@@ -142,7 +143,8 @@ function getSkipRate(humanCount) {
   let base = 0.15;
   if (sessionStartTime) {
     const min = (Date.now() - sessionStartTime) / 60000;
-    if (min >= 90) base = 0.40;
+    if (min >= 240) base = 0.28;      // 4時間以上：常連として馴染み、少し戻る
+    else if (min >= 90) base = 0.40;
     else if (min >= 60) base = 0.35;
     else if (min >= 30) base = 0.25;
   }
@@ -200,6 +202,17 @@ function scheduleMutter() {
         client.channels.fetch(notifyChannelId)
           .then((ch) => ch?.send(actionMsg))
           .catch(() => {});
+      }
+      // 独り言の余韻（20%）：15〜45秒後にもう一言
+      if (Math.random() < 0.20) {
+        const echoDelay = (15 + Math.random() * 30) * 1000;
+        setTimeout(() => {
+          if (!vcHandler.isConnected() || isFocused) return;
+          const echoMsg = pick("vc_mutter_echo");
+          if (echoMsg && notifyChannelId) {
+            client.channels.fetch(notifyChannelId).then((ch) => ch?.send(echoMsg)).catch(() => {});
+          }
+        }, echoDelay);
       }
     }
     scheduleMutter(); // 次の独り言をスケジュール
@@ -264,6 +277,16 @@ function scheduleTempLeave(capricious = false) {
     const humanCount = currentVCChannel?.members?.filter((m) => !m.user.bot).size ?? 0;
     if (humanCount === 0) { scheduleTempLeave(capricious); return; }
     if (Math.random() > leaveRate) { scheduleTempLeave(capricious); return; }
+    // 退席前の予兆（25%）：1〜3分前にほのめかし
+    if (Math.random() < 0.25) {
+      const hintMsg = pick("vc_pre_leave");
+      const notifyChannelId = [...targetChannelIds][0];
+      if (hintMsg && notifyChannelId) {
+        client.channels.fetch(notifyChannelId).then((ch) => ch?.send(hintMsg)).catch(() => {});
+      }
+      await new Promise((r) => setTimeout(r, (60 + Math.random() * 120) * 1000));
+      if (!vcHandler.isConnected() || isTemporarilyAway) return;
+    }
     await doTempLeave();
   }, delayMs);
 }
@@ -350,15 +373,15 @@ function scheduleLongStayCheck() {
     if (!notifyChannelId) return;
     for (const [userId, joinTime] of userJoinTimes) {
       const stayMin = (now - joinTime) / 60000;
-      if (stayMin >= 60 && Math.random() < 0.20) {
+      if (stayMin >= 180 && Math.random() < 0.20) { // 3時間以上で言及
         const msg = pick("vc_long_stay") || "……まだいるのか。粘るな。";
         const ch = await client.channels.fetch(notifyChannelId).catch(() => null);
         if (ch) await ch.send(msg).catch(() => {});
-        userJoinTimes.set(userId, now); // 次の1時間をリセット
+        userJoinTimes.set(userId, now); // 次の3時間をリセット
         break; // 1回のチェックで1件だけ送信
       }
     }
-  }, 15 * 60 * 1000); // 15分ごとにチェック
+  }, 60 * 60 * 1000); // 60分ごとにチェック（長時間滞在者向け）
 }
 
 // ─── VC状態の永続化（再起動後に自動再参加するため）─────────────────────────
@@ -671,7 +694,16 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     const notifyChannelId = [...targetChannelIds][0];
     if (notifyChannelId) {
       let reactMsg;
-      if (humanCount >= 5) {
+      const joinHour = getJSTHour();
+      const leaveTs = sessionLeavers.get(newState.member.id);
+      if (leaveTs && Date.now() - leaveTs < 2 * 60 * 60 * 1000) {
+        // 再入室：2時間以内に戻ってきた場合のみ
+        reactMsg = pick("vc_rejoin");
+        sessionLeavers.delete(newState.member.id);
+      } else if (joinHour >= 0 && joinHour < 3 && Math.random() < 0.50) {
+        // 夜更かし指摘：深夜0〜3時
+        reactMsg = pick("vc_nightowl");
+      } else if (humanCount >= 5) {
         reactMsg = pick("vc_crowd_heavy") || "……これ以上増えるなら退出する。";
       } else if (humanCount >= 3) {
         reactMsg = pick("vc_crowd_mild") || "……増えたか。管理が煩雑になる。";
@@ -692,6 +724,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     newState.channelId !== botChannelId
   ) {
     userJoinTimes.delete(oldState.member.id); // ⑥ 退出で削除
+    sessionLeavers.set(oldState.member.id, Date.now()); // 再入室検知用に記録
     if (humanCount > 0 && Math.random() < 0.40) { // まだ誰かいる場合のみ反応
       const notifyChannelId = [...targetChannelIds][0];
       const msg = pick("vc_leave");
@@ -723,6 +756,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         userJoinTimes.clear();
         userResponseTrack.clear();
         ignoredUsers.clear();
+        sessionLeavers.clear();
         currentVCChannel = null;
         sessionStartTime = null;
         vcHandler.leave();
@@ -865,6 +899,7 @@ client.on("messageCreate", async (message) => {
       userJoinTimes.clear();
       userResponseTrack.clear();
       ignoredUsers.clear();
+      sessionLeavers.clear();
       currentVCChannel = null;
       sessionStartTime = null;
       listenCallback = null;
