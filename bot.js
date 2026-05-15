@@ -796,7 +796,8 @@ client.on("messageCreate", async (message) => {
     content.startsWith("!kanshi ") ||
     content === "!hakase" ||
     content.startsWith("!hakase ") ||
-    content === "!owari";
+    content === "!owari" ||
+    content === "!status";
 
   if (BOT_MODE === "text" && isVCCommand) return;
   if (BOT_MODE === "vc" && !isVCCommand) return;
@@ -940,6 +941,55 @@ client.on("messageCreate", async (message) => {
     case "!observe": { const t = pick("observe"); if (t) await message.reply(t); return; }
     case "!reward":  { const t = pick("reward");  if (t) await message.reply(t); return; }
 
+    case "!status": {
+      const now = Date.now();
+      const lines = ["……現状を報告する。\n"];
+
+      // 機嫌
+      const moodLabel = dailyMood === "good" ? "良好" : dailyMood === "bad" ? "不調" : "普通";
+      const moodNote  = dailyMood === "good" ? "（機嫌がいい）" : dailyMood === "bad" ? "（機嫌が悪い）" : "";
+      lines.push(`【本日の機嫌】${moodLabel}${moodNote}`);
+
+      // VCステータス
+      if (isTemporarilyAway) {
+        lines.push("【VC状態】途中退席中（後で戻る）");
+      } else if (vcHandler.isConnected()) {
+        const chName = currentVCChannel?.name ?? "不明";
+        const elapsedMin = sessionStartTime ? Math.floor((now - sessionStartTime) / 60000) : 0;
+        const h = Math.floor(elapsedMin / 60);
+        const m = elapsedMin % 60;
+        const elapsed = h > 0 ? `${h}時間${m}分経過` : `${m}分経過`;
+        lines.push(`【VC状態】監視中 ─ 「${chName}」${elapsed}`);
+
+        const humanCount = currentVCChannel?.members?.filter((mb) => !mb.user.bot).size ?? 0;
+        lines.push(`【VC内人数】${humanCount}人`);
+
+        const skipRate = getSkipRate(humanCount);
+        const responseRate = Math.round((1 - skipRate) * 100);
+        lines.push(`【応答率（目安）】約${responseRate}%`);
+      } else {
+        lines.push("【VC状態】未接続");
+      }
+
+      // 現在の状態
+      if (isFocused) {
+        lines.push("【現在の状態】集中モード中（応答制限中）");
+      } else if (isTemporarilyAway) {
+        lines.push("【現在の状態】途中退席中");
+      } else {
+        lines.push("【現在の状態】通常");
+      }
+
+      // 気のせいかモードで無視中
+      const ignoredCount = [...ignoredUsers.values()].filter((until) => until > now).length;
+      if (ignoredCount > 0) {
+        lines.push(`【一時無視中】${ignoredCount}人（気のせいかモード）`);
+      }
+
+      await message.reply(lines.join("\n"));
+      return;
+    }
+
     case "!reload": {
       const ok = loadMessages();
       if (ok) {
@@ -968,6 +1018,7 @@ client.on("messageCreate", async (message) => {
         "!kike          … 音声聴き取りON\n" +
         "!kikanai       … 音声聴き取りOFF\n" +
         "!owari         … VCから退出\n" +
+        "!status        … 現在の機嫌・VC状態を確認\n" +
         "!reload        … messages.json を再読み込み\n" +
         "!help          … このヘルプを表示\n\n" +
         "それ以外のメッセージはドットーレが回答します。"
