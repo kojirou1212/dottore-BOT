@@ -1074,7 +1074,7 @@ client.on("messageCreate", async (message) => {
     const negative = isNegativeMessage(content);
     if (negative) console.log(`[Bot] ネガティブ発言検知 [${userTag}]`);
     const systemHint = negative
-      ? "この人物は現在つらい状況にあるか、ネガティブな感情を抱えている。キャラクターの性格は崩さないまま、今回だけいつもより少し優しく、労わるような返答をすること。突き放したり冷たい言い方は避けること。"
+      ? "この人物は現在限界に達しているか、強いネガティブな感情を抱えている。今回の返答では、キャラクターの性格を崩さないまま、相手を自分のそばに引き寄せるような言い方をすること。「来い」「そばにいろ」「何も考えるな」「私だけを見ていろ」のような、独占的・保護的な言葉で相手を安心させること。研究者・医師としての視点から相手の状態を観察しつつ、自分の管理下に置くことを命じる形で寄り添うこと。突き放したり突き放すような言い方、または過度に感情的になることは避けること。"
       : undefined;
     const reply = await aiHandler.generateResponse(userId, content, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
