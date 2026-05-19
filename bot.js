@@ -188,6 +188,19 @@ function isNegativeMessage(text) {
   return NEGATIVE_KEYWORDS.some((kw) => text.includes(kw));
 }
 
+// ドットーレの生存を願う・心配する発言の検知
+const SURVIVAL_KEYWORDS = [
+  "生きろ", "生きて", "生きてほしい", "生きてください", "生きてくれ",
+  "死なないで", "死なないでください", "死なないでほしい", "死ぬな",
+  "消えないで", "消えないでください", "消えないでほしい",
+  "いなくならないで", "いなくなるな", "いなくならないでほしい",
+  "死なないで", "消えないで",
+];
+
+function isSurvivalMessage(text) {
+  return SURVIVAL_KEYWORDS.some((kw) => text.includes(kw));
+}
+
 // 鼻歌判定：延音符を含み、内容語を持たない音のみの文字列
 // 例: "んーーー" "ふ〜ふ〜" "らら〜" "〜〜〜"
 function isHummingTranscript(text) {
@@ -1071,9 +1084,13 @@ client.on("messageCreate", async (message) => {
 
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
-    const negative = isNegativeMessage(content);
+    const survival = isSurvivalMessage(content);
+    const negative = !survival && isNegativeMessage(content);
+    if (survival) console.log(`[Bot] 生存願望発言検知 [${userTag}]`);
     if (negative) console.log(`[Bot] ネガティブ発言検知 [${userTag}]`);
-    const systemHint = negative
+    const systemHint = survival
+      ? "この人物はドットーレが消えること・死ぬことへの不安や心配、または生存を強く願う気持ちを表現している。今回の返答では、心配されていることを淡々と受け止めつつ、「そう簡単に消えるつもりはない」「私の生死を心配する必要はない」「まだ観察は終わっていない」「お前たちより先に消えるつもりはない」などの言い方で、消えない・死なないという確かな意志を示すこと。感情的にはならず、そっけないが揺るぎない存在感を示す返答にすること。相手の心配を否定するのではなく、ただ確かにそこにいることを示すこと。"
+      : negative
       ? "この人物は現在限界に達しているか、強いネガティブな感情を抱えている。今回の返答では、医師・研究者として相手の状態を淡々と観察・判断し、「対象を最適な状態に保つのは自分の職務である」という論理で動くこと。感情的な言葉（心配・かわいそう・大丈夫かなど）は一切使わず、そっけない口調のまま「休め」「余計なことを考えなくていい、私が管理する」「今は私の観察下にいろ」という形で指示を出すこと。冷たく突き放すのではなく、淡々としているが確実にそばにいる、という距離感にすること。"
       : undefined;
     const reply = await aiHandler.generateResponse(userId, content, { systemHint });
