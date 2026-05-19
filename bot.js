@@ -165,6 +165,40 @@ function getSkipRate(humanCount) {
 // ③ キーワード（名前を呼ばれたら必ず反応）
 const TRIGGER_KEYWORDS = ["ドットーレ", "博士", "ハカセ", "dottore"];
 
+// ネガティブ発言の検知キーワード
+const NEGATIVE_KEYWORDS = [
+  "つらい", "辛い", "つらくて", "辛くて", "つらすぎ", "辛すぎ",
+  "しんどい", "しんどくて", "しんどすぎ",
+  "きつい", "きつくて", "きつすぎ",
+  "苦しい", "苦しくて",
+  "悲しい", "悲しくて", "かなしい",
+  "寂しい", "寂しくて", "さみしい",
+  "怖い", "怖くて", "こわい",
+  "不安", "落ち込", "凹んだ", "凹んでる", "へこんだ", "へこんでる",
+  "憂鬱", "ゆううつ", "絶望",
+  "疲れた", "つかれた", "くたくた", "ぐったり",
+  "もう無理", "もうだめ", "もうダメ", "もう限界", "限界",
+  "死にたい", "消えたい", "いなくなりたい",
+  "泣いてる", "泣きたい", "泣いた", "泣いちゃった",
+  "最悪", "嫌になった", "嫌になってる",
+  "ダメだ", "だめだ", "自分が嫌",
+];
+
+function isNegativeMessage(text) {
+  return NEGATIVE_KEYWORDS.some((kw) => text.includes(kw));
+}
+
+// 鼻歌判定：延音符を含み、内容語を持たない音のみの文字列
+// 例: "んーーー" "ふ〜ふ〜" "らら〜" "〜〜〜"
+function isHummingTranscript(text) {
+  const t = text.trim();
+  if (!t || t.length > 15) return false;
+  // 延音符・音符が少なくとも1つある
+  if (!/[ーー〜～♪♩]/.test(t)) return false;
+  // 鼻歌・延音に使われる音節と記号だけで構成されている
+  return /^[んンふフはハほホらラるルれレりリなナにニぬヌねネのノむムまマみミめメもモヤやゆユよヨーー〜～♪♩\s　]+$/.test(t);
+}
+
 // ④⑤ 時間帯と機嫌に応じた独り言間隔（深夜短め・朝長め）
 function getMutterDelayMs() {
   const hour = getJSTHour();
@@ -441,6 +475,12 @@ function makeListenCallback() {
         }
         ignoredUsers.delete(speakerId);
         userResponseTrack.delete(speakerId);
+      }
+
+      // 鼻歌検知：内容のない音は無視
+      if (isHummingTranscript(transcript)) {
+        console.log(`[Bot] 鼻歌スキップ [${speakerId}]: "${transcript}"`);
+        return;
       }
 
       // キーワード検出（名前を呼ばれたら必ず反応・遅延最小化）
@@ -1031,7 +1071,12 @@ client.on("messageCreate", async (message) => {
 
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
-    const reply = await aiHandler.generateResponse(userId, content);
+    const negative = isNegativeMessage(content);
+    if (negative) console.log(`[Bot] ネガティブ発言検知 [${userTag}]`);
+    const systemHint = negative
+      ? "この人物は現在つらい状況にあるか、ネガティブな感情を抱えている。キャラクターの性格は崩さないまま、今回だけいつもより少し優しく、労わるような返答をすること。突き放したり冷たい言い方は避けること。"
+      : undefined;
+    const reply = await aiHandler.generateResponse(userId, content, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
       try {

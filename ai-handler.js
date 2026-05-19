@@ -76,7 +76,7 @@ class AIHandler {
     throw lastError;
   }
 
-  async generateResponse(userId, userMessage) {
+  async generateResponse(userId, userMessage, { systemHint } = {}) {
     const history = this.getHistory(userId);
 
     while (history.length > 0 && history[history.length - 1].role === "user") {
@@ -93,7 +93,7 @@ class AIHandler {
     this.sanitizeHistory(history);
 
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-    const systemPromptWithTime = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}`;
+    const systemPromptWithTime = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}${systemHint ? `\n\n${systemHint}` : ""}`;
     const chatHistory = history.slice(0, -1);
     const apiKey = this.config.gemini.apiKey;
 
