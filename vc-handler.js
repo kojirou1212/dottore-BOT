@@ -44,6 +44,24 @@ try {
   }
 }
 
+// ── PCM ダウンサンプリング（48kHz ステレオ → 16kHz モノラル）─────────────
+// STT に必要な品質は 16kHz モノラルで十分。送信データが 1/6 になる
+function downsamplePcm(pcmBuffer, fromRate = 48000, toRate = 16000, channels = 2) {
+  const ratio = fromRate / toRate;
+  const inSamplesPerCh = Math.floor(pcmBuffer.length / (channels * 2));
+  const outSamples = Math.floor(inSamplesPerCh / ratio);
+  const out = Buffer.alloc(outSamples * 2);
+  for (let i = 0; i < outSamples; i++) {
+    const src = Math.floor(i * ratio);
+    let sum = 0;
+    for (let c = 0; c < channels; c++) {
+      sum += pcmBuffer.readInt16LE((src * channels + c) * 2);
+    }
+    out.writeInt16LE(Math.round(sum / channels), i * 2);
+  }
+  return out;
+}
+
 // ── PCM → WAV 変換 ────────────────────────────────────────────────────────
 function pcmToWav(pcmBuffer, sampleRate = 48000, channels = 2, bitDepth = 16) {
   const header = Buffer.alloc(44);
@@ -154,7 +172,8 @@ class VCHandler {
     this._transcriptCallback = null;
     this._speakingHandler = null;
     this._lastResponseTime = 0;
-    this._cooldownMs = config.ai?.listenCooldownMs ?? 15000;
+    this._cooldownMs = config.ai?.listenCooldownMs ?? 30000;
+    this._preFilter = null; // (userId) => boolean — true なら STT スキップ
 
     if (this.vcAvailable) {
       const { createAudioPlayer, AudioPlayerStatus } = voiceLib;
@@ -348,6 +367,25 @@ ${soundList}
     return SOUND_BOARD[Math.floor(Math.random() * SOUND_BOARD.length)];
   }
 
+  // タグのキーワードマッチングでサウンドをローカル選択（API呼び出しなし）
+  selectSoundLocal(userMessage) {
+    const msg = userMessage.toLowerCase();
+    const scored = SOUND_BOARD
+      .filter((s) => s.name !== "無音")
+      .map((sound) => ({
+        sound,
+        score: sound.tags.filter((tag) => msg.includes(tag.toLowerCase())).length,
+      }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length > 0) {
+      console.log(`[VCHandler] ローカル音声選択: ${scored[0].sound.name} (スコア:${scored[0].score})`);
+      return { sounds: [scored[0].sound], thought: "" };
+    }
+    return { sounds: [this.mutter()], thought: "" };
+  }
+
   // ① 独り言用：短くて自然なサウンドをランダム選択
   mutter() {
     const candidates = SOUND_BOARD.filter((s) => MUTTER_SOUND_NAMES.includes(s.name));
@@ -404,7 +442,7 @@ ${soundList}
 
   // ── メッセージに応じて音声を選択して再生（統合メソッド）─────────────────
   async respondToMessage(userMessage) {
-    const { sounds, thought } = await this.selectSound(userMessage);
+    const { sounds, thought } = this.selectSoundLocal(userMessage);
     const results = [];
     for (const sound of sounds) {
       if (!sound) continue;
@@ -457,6 +495,7 @@ ${soundList}
       if (this._activeStreams.size > 0) return;
       if (Date.now() - this._lastResponseTime < this._cooldownMs) return;
       if (!this._transcriptCallback) return;
+      if (this._preFilter && this._preFilter(userId)) return; // 集中モード・無視中をSTT前に排除
 
       const pcmChunks = [];
       const opusStream = receiver.subscribe(userId, {
@@ -496,26 +535,26 @@ ${soundList}
         let pcm = Buffer.concat(entry.pcmChunks);
         entry.pcmChunks.length = 0; // キャッシュを即時クリア
 
-        if (pcm.length < 48000 * 2 * 2 * 0.5) {
+        if (pcm.length < 48000 * 2 * 2 * 1.5) { // 1.5秒未満は無音・ノイズとして破棄
           this._activeStreams.delete(userId);
           return;
         }
         if (pcm.length > MAX_PCM) pcm = pcm.subarray(0, MAX_PCM);
 
-        let responded = false;
         try {
-          const wav = pcmToWav(pcm);
+          // 48kHz ステレオ → 16kHz モノラルにダウンサンプリングしてから STT
+          const pcm16 = downsamplePcm(pcm);
+          const wav = pcmToWav(pcm16, 16000, 1, 16);
           const text = await this._transcribeAudio(wav);
           if (text && text.trim() && this._transcriptCallback) {
             console.log(`[VCHandler] 音声認識 [${userId}]: ${text.trim()}`);
             await this._transcriptCallback(userId, text.trim());
-            responded = true;
           }
         } catch (err) {
           console.error("[VCHandler] 音声認識エラー:", err.message);
         } finally {
           this._activeStreams.delete(userId);
-          if (responded) this._lastResponseTime = Date.now();
+          this._lastResponseTime = Date.now(); // SILENT 含め常にリセット（バースト防止）
         }
       });
 

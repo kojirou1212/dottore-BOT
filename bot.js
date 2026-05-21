@@ -23,7 +23,7 @@ if (process.env.DISCORD_TOKEN) {
       apiKey: process.env.GEMINI_API_KEY,
       model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       maxTokens: parseInt(process.env.MAX_TOKENS || "1000", 10),
-      maxHistoryLength: parseInt(process.env.MAX_HISTORY_LENGTH || "20", 10),
+      maxHistoryLength: parseInt(process.env.MAX_HISTORY_LENGTH || "10", 10),
     },
     ai: {
       systemPrompt: process.env.SYSTEM_PROMPT || "You are a helpful assistant.",
@@ -125,6 +125,13 @@ let longStayTimer = null;     // ⑥ 長居チェック定期タイマー
 const userResponseTrack = new Map(); // 同一応答追跡 userId→{text, count, firstTime}
 const ignoredUsers = new Map();      // 一時無視 userId→ignoreUntilTimestamp
 const sessionLeavers = new Map();    // 今セッション中に退出したユーザーID（再入室検知用）userId→leaveTimestamp
+
+// 集中モード中・一時無視中のユーザーはSTT前に排除（API呼び出し自体をスキップ）
+vcHandler._preFilter = (userId) => {
+  if (isFocused) return true;
+  const ignoreUntil = ignoredUsers.get(userId);
+  return ignoreUntil != null && Date.now() < ignoreUntil;
+};
 
 function getJSTHour() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
@@ -1109,9 +1116,9 @@ client.on("messageCreate", async (message) => {
     }
     console.log(`[Bot] 返答送信完了 [${userTag}]`);
 
-    // VCに接続中なら音声も再生（非同期・応答は待たない）
+    // VCに接続中なら音声も再生（AI返答テキストでマッチング・非同期）
     if (vcHandler.isConnected()) {
-      vcHandler.respondToMessage(content).catch((err) =>
+      vcHandler.respondToMessage(reply).catch((err) =>
         console.error("[Bot] テキスト→VC音声エラー:", err.message)
       );
     }
