@@ -1136,7 +1136,7 @@ client.on("messageCreate", async (message) => {
         "!observe                      … 観察してほしいとき\n" +
         "!reward                       … 成功・達成を報告する\n" +
         "!profile                      … 自分のプロフィールシートを表示\n" +
-        "!profile set [フィールド] [値] … プロフィールに記入（呼び名・年齢・状態・備考）\n" +
+        "!profile set [フィールド] [値] … プロフィールに記入（呼び名・症状・傾向・弱点・備考）\n" +
         "!profile clear [フィールド]   … 特定フィールドを消去\n" +
         "!profile reset                … 記入欄をすべてリセット\n" +
         "!kanshi [VC名]                … VCに召喚（音声聴き取りON）\n" +

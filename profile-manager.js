@@ -7,17 +7,23 @@ const PROFILES_PATH = path.join(__dirname, "user-profiles.json");
 // 日本語フィールド名 → 内部キー
 const FIELD_MAP = {
   "呼び名": "name",
-  "年齢":   "age",
-  "状態":   "status",
+  "症状":   "symptom",
+  "傾向":   "tendency",
+  "弱点":   "weakness",
   "備考":   "memo",
 };
 
 const FIELD_LABELS = {
-  name:   "呼び名",
-  age:    "年齢",
-  status: "現在の状態",
-  memo:   "備考",
+  name:      "呼び名",
+  symptom:   "症状・現在の状態",
+  tendency:  "傾向・特徴",
+  weakness:  "弱点・苦手",
+  memo:      "備考",
 };
+
+const EMPTY_USER_FIELDS = () => ({
+  name: null, symptom: null, tendency: null, weakness: null, memo: null,
+});
 
 class ProfileManager {
   constructor() {
@@ -29,6 +35,22 @@ class ProfileManager {
     try {
       if (fs.existsSync(PROFILES_PATH)) {
         this.profiles = JSON.parse(fs.readFileSync(PROFILES_PATH, "utf-8"));
+        // 旧フォーマット（age/statusキー）を新フォーマットへ移行
+        for (const p of Object.values(this.profiles)) {
+          if (!p.userFields) { p.userFields = EMPTY_USER_FIELDS(); continue; }
+          if ("age" in p.userFields) {
+            if (!p.userFields.symptom && p.userFields.age) p.userFields.symptom = `年齢: ${p.userFields.age}`;
+            delete p.userFields.age;
+          }
+          if ("status" in p.userFields) {
+            if (!p.userFields.symptom && p.userFields.status) p.userFields.symptom = p.userFields.status;
+            delete p.userFields.status;
+          }
+          // 新キーが未定義なら補完
+          for (const key of Object.keys(EMPTY_USER_FIELDS())) {
+            if (!(key in p.userFields)) p.userFields[key] = null;
+          }
+        }
         console.log(`[Profiles] ${Object.keys(this.profiles).length}件読み込み完了`);
       }
     } catch (err) {
@@ -50,7 +72,7 @@ class ProfileManager {
       const now = new Date().toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
       this.profiles[userId] = {
         displayName,
-        userFields: { name: null, age: null, status: null, memo: null },
+        userFields: EMPTY_USER_FIELDS(),
         botRecord: {
           firstSeen: now,
           lastSeen: now,
@@ -82,9 +104,9 @@ class ProfileManager {
     if (p) { p.botRecord.survivalCount++; this.save(); }
   }
 
-  // フィールドをセット（日本語キーまたは内部キーどちらでも可）
+  // フィールドをセット（日本語キーで指定）
   setField(userId, rawField, value, displayName = "") {
-    const p = this._getOrCreate(userId, displayName); // 未作成でも初期化
+    const p = this._getOrCreate(userId, displayName);
     const key = rawField.normalize("NFC").trim();
     const field = FIELD_MAP[key] ?? (Object.prototype.hasOwnProperty.call(FIELD_LABELS, key) ? key : null);
     if (!field) return false;
@@ -109,7 +131,7 @@ class ProfileManager {
   resetUserFields(userId) {
     const p = this.profiles[userId];
     if (!p) return false;
-    p.userFields = { name: null, age: null, status: null, memo: null };
+    p.userFields = EMPTY_USER_FIELDS();
     this.save();
     return true;
   }
@@ -138,9 +160,10 @@ class ProfileManager {
 
     lines.push("\n── 記入コマンド ──");
     lines.push("`!profile set 呼び名 [名前]`");
-    lines.push("`!profile set 年齢 [年齢]`");
-    lines.push("`!profile set 状態 [現在の状態]`");
-    lines.push("`!profile set 備考 [メモ]`");
+    lines.push("`!profile set 症状 [現在の不調・状態]`");
+    lines.push("`!profile set 傾向 [性格・行動パターン]`");
+    lines.push("`!profile set 弱点 [苦手・気にしていること]`");
+    lines.push("`!profile set 備考 [自由メモ]`");
     lines.push("`!profile clear [フィールド名]` … 特定フィールドを消去");
     lines.push("`!profile reset` … 記入欄をすべてリセット");
 
@@ -152,18 +175,26 @@ class ProfileManager {
     const p = this.profiles[userId];
     if (!p) return "";
     const parts = [];
-    if (p.userFields.name)   parts.push(`呼び名「${p.userFields.name}」`);
-    if (p.userFields.age)    parts.push(`年齢${p.userFields.age}`);
-    if (p.userFields.status) parts.push(`本人申告の状態「${p.userFields.status}」`);
-    if (p.userFields.memo)   parts.push(`本人備考「${p.userFields.memo}」`);
+    if (p.userFields.name)     parts.push(`呼び名「${p.userFields.name}」`);
+    if (p.userFields.symptom)  parts.push(`申告症状・状態「${p.userFields.symptom}」`);
+    if (p.userFields.tendency) parts.push(`行動傾向「${p.userFields.tendency}」`);
+    if (p.userFields.memo)     parts.push(`備考「${p.userFields.memo}」`);
     if (p.botRecord.negativeCount > 0) {
       parts.push(`過去にネガティブ反応${p.botRecord.negativeCount}回観測済み`);
     }
     if (p.botRecord.survivalCount > 0) {
       parts.push(`ドットーレの生存を心配する発言${p.botRecord.survivalCount}回観測済み`);
     }
-    if (parts.length === 0) return "";
-    return `【この被検体の記録】${parts.join("、")}。`;
+
+    // 弱点は別枠で明示（AI配慮指示として強調）
+    const weaknessHint = p.userFields.weakness
+      ? `この被検体の弱点・懸念事項として「${p.userFields.weakness}」が記録されている。この点には不用意に踏み込まず、観察・管理の観点から慎重に扱うこと。`
+      : "";
+
+    if (parts.length === 0 && !weaknessHint) return "";
+
+    const baseHint = parts.length > 0 ? `【この被検体の記録】${parts.join("、")}。` : "";
+    return [baseHint, weaknessHint].filter(Boolean).join("\n");
   }
 }
 
