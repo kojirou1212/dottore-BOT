@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const AIHandler = require("./ai-handler");
 const { VCHandler } = require("./vc-handler");
+const ProfileManager = require("./profile-manager");
 
 // ─── 設定の読み込み（環境変数優先、なければ config.json）─────────────────
 let config;
@@ -103,6 +104,7 @@ const client = new Client({
 
 const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
+const profileManager = new ProfileManager();
 const targetChannelIds = new Set(config.discord.targetChannelIds);
 
 // 一人になったときの退出タイマー
@@ -859,8 +861,10 @@ client.on("messageCreate", async (message) => {
     content === "!owari" ||
     content === "!status";
 
+  const isProfileCommand = content === "!profile" || content.startsWith("!profile ");
+
   if (BOT_MODE === "text" && isVCCommand) return;
-  if (BOT_MODE === "vc" && !isVCCommand) return;
+  if (BOT_MODE === "vc" && !isVCCommand && !isProfileCommand) return;
 
   // ── !kanshi ───────────────────────────────────────────────────
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
@@ -941,6 +945,61 @@ client.on("messageCreate", async (message) => {
     } else {
       await message.reply("……今は声が出ない。");
     }
+    return;
+  }
+
+  // ── !profile ──────────────────────────────────────────────────
+  if (isProfileCommand) {
+    const args = content.slice("!profile".length).trim();
+
+    // !profile → 表示
+    if (!args) {
+      const sheet = profileManager.format(userId);
+      if (sheet) {
+        await message.reply(sheet);
+      } else {
+        await message.reply("……記録がない。まず何か発言しろ。そうすれば観察を開始する。");
+      }
+      return;
+    }
+
+    // !profile reset → 記入欄リセット
+    if (args === "reset") {
+      const ok = profileManager.resetUserFields(userId);
+      await message.reply(ok ? "……記入欄をリセットした。また書き直せ。" : "……お前の記録がない。");
+      return;
+    }
+
+    // !profile clear [フィールド] → フィールド消去
+    if (args.startsWith("clear ")) {
+      const field = args.slice("clear ".length).trim();
+      const ok = profileManager.clearField(userId, field);
+      await message.reply(ok
+        ? `……「${field}」を消去した。`
+        : `……「${field}」は存在しないフィールドだ。呼び名・年齢・状態・備考 から指定しろ。`
+      );
+      return;
+    }
+
+    // !profile set [フィールド] [値]
+    if (args.startsWith("set ")) {
+      const rest = args.slice("set ".length).trim();
+      const spaceIdx = rest.search(/\s/);
+      if (spaceIdx === -1) {
+        await message.reply("……値が空だ。`!profile set 呼び名 [名前]` の形式で入力しろ。");
+        return;
+      }
+      const field = rest.slice(0, spaceIdx);
+      const value = rest.slice(spaceIdx + 1).trim();
+      const ok = profileManager.setField(userId, field, value);
+      await message.reply(ok
+        ? `……「${field}」を「${value}」として記録した。`
+        : `……「${field}」は不明なフィールドだ。呼び名・年齢・状態・備考 から指定しろ。`
+      );
+      return;
+    }
+
+    await message.reply("……使い方が間違っている。\n`!profile` … 表示\n`!profile set 呼び名 [名前]` … 記入\n`!profile clear [フィールド]` … 消去\n`!profile reset` … リセット");
     return;
   }
 
@@ -1065,22 +1124,26 @@ client.on("messageCreate", async (message) => {
     case "!help":
       await message.reply(
         "【コマンド一覧】\n" +
-        "!reset         … 自分の会話履歴をリセット\n" +
-        "!resetall      … 全ユーザーの会話履歴をリセット\n" +
-        "!okusuri       … 薬を投与してもらう\n" +
-        "!sleep         … 就寝前、管理下で休む\n" +
-        "!pain          … 痛み・不調を報告する\n" +
-        "!work          … 作業・勉強を開始する\n" +
-        "!observe       … 観察してほしいとき\n" +
-        "!reward        … 成功・達成を報告する\n" +
-        "!kanshi [VC名] … VCに召喚（音声聴き取りON）\n" +
-        "!hakase [msg]  … VCで音声再生\n" +
-        "!kike          … 音声聴き取りON\n" +
-        "!kikanai       … 音声聴き取りOFF\n" +
-        "!owari         … VCから退出\n" +
-        "!status        … 現在の機嫌・VC状態を確認\n" +
-        "!reload        … messages.json を再読み込み\n" +
-        "!help          … このヘルプを表示\n\n" +
+        "!reset                        … 自分の会話履歴をリセット\n" +
+        "!resetall                     … 全ユーザーの会話履歴をリセット\n" +
+        "!okusuri                      … 薬を投与してもらう\n" +
+        "!sleep                        … 就寝前、管理下で休む\n" +
+        "!pain                         … 痛み・不調を報告する\n" +
+        "!work                         … 作業・勉強を開始する\n" +
+        "!observe                      … 観察してほしいとき\n" +
+        "!reward                       … 成功・達成を報告する\n" +
+        "!profile                      … 自分のプロフィールシートを表示\n" +
+        "!profile set [フィールド] [値] … プロフィールに記入（呼び名・年齢・状態・備考）\n" +
+        "!profile clear [フィールド]   … 特定フィールドを消去\n" +
+        "!profile reset                … 記入欄をすべてリセット\n" +
+        "!kanshi [VC名]                … VCに召喚（音声聴き取りON）\n" +
+        "!hakase [msg]                 … VCで音声再生\n" +
+        "!kike                         … 音声聴き取りON\n" +
+        "!kikanai                      … 音声聴き取りOFF\n" +
+        "!owari                        … VCから退出\n" +
+        "!status                       … 現在の機嫌・VC状態を確認\n" +
+        "!reload                       … messages.json を再読み込み\n" +
+        "!help                         … このヘルプを表示\n\n" +
         "それ以外のメッセージはドットーレが回答します。"
       );
       return;
@@ -1089,17 +1152,25 @@ client.on("messageCreate", async (message) => {
   // ── AI 応答 ───────────────────────────────────────────────────
   console.log(`[Bot] メッセージ受信 [${userTag}]: ${content.slice(0, 80)}`);
 
+  // プロフィール更新（メッセージカウント・最終観測）
+  profileManager.onMessage(userId, userTag);
+
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const survival = isSurvivalMessage(content);
     const negative = !survival && isNegativeMessage(content);
-    if (survival) console.log(`[Bot] 生存願望発言検知 [${userTag}]`);
-    if (negative) console.log(`[Bot] ネガティブ発言検知 [${userTag}]`);
-    const systemHint = survival
+    if (survival) { console.log(`[Bot] 生存願望発言検知 [${userTag}]`); profileManager.onSurvival(userId); }
+    if (negative) { console.log(`[Bot] ネガティブ発言検知 [${userTag}]`); profileManager.onNegative(userId); }
+
+    const profileHint = profileManager.getContextHint(userId);
+
+    const sentimentHint = survival
       ? "この人物はドットーレの消滅・死・不在を恐れ、存続を強く望んでいる。今回の返答では、感情的な保証は不要。研究者の論理として「実験が途中だ」「観察対象がいなくなれば観察が終わる、それは認められない」「消える理由が今のところ存在しない」という形で存在の継続を示すこと。「心配するな」「大丈夫だ」は使わない。「まだ観察は終わっていない」「お前が心配するような状況にはない、今のところ」「私が消える前にすることがある」など、論理的・実務的な表現で確かな存在感を示すこと。完全に安心させず、観察対象として繋ぎ止める余白を残すこと。"
       : negative
       ? "対象の状態が観察適正範囲を外れつつある。今回の返答では、不安定・消耗・混乱といった状態変化を研究者として認識・記録する立場から応答すること。「心配」「かわいそう」「大丈夫」などの感情語は一切使わない。代わりに「誤差が大きくなっている」「状態が最適範囲を外れた」「今は余計な負荷をかけるな」「私の管理下で安定させろ」など、観察・管理・最適化の言語で対応すること。突き放さず、ただ確実にそこにいる研究者として「お前の状態は把握している」という事実を静かに示すこと。完全に安心させず、ただ管理下にいることを確認させる余白を残すこと。"
-      : undefined;
+      : null;
+
+    const systemHint = [profileHint, sentimentHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, content, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
