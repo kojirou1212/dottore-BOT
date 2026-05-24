@@ -79,6 +79,7 @@ class ProfileManager {
           messageCount: 0,
           negativeCount: 0,
           survivalCount: 0,
+          observation: null,
         },
       };
     }
@@ -127,6 +128,14 @@ class ProfileManager {
     return true;
   }
 
+  // ドットーレの観察メモを更新
+  setObservation(userId, text) {
+    const p = this.profiles[userId];
+    if (!p) return;
+    p.botRecord.observation = text.trim();
+    this.save();
+  }
+
   // 記入欄をすべてリセット（観察記録は保持）
   resetUserFields(userId) {
     const p = this.profiles[userId];
@@ -157,6 +166,7 @@ class ProfileManager {
     lines.push(`観測回数: ${p.botRecord.messageCount}回`);
     lines.push(`ネガティブ反応: ${p.botRecord.negativeCount > 0 ? `${p.botRecord.negativeCount}回検知` : "なし"}`);
     lines.push(`心配発言: ${p.botRecord.survivalCount > 0 ? `${p.botRecord.survivalCount}回検知` : "なし"}`);
+    lines.push(`人物評価: ${p.botRecord.observation ?? "……まだ観察データが不足している。"}`);
 
     lines.push("\n── 記入コマンド ──");
     lines.push("`!profile set 呼び名 [名前]`");
@@ -191,10 +201,15 @@ class ProfileManager {
       ? `この被検体の弱点・懸念事項として「${p.userFields.weakness}」が記録されている。この点には不用意に踏み込まず、観察・管理の観点から慎重に扱うこと。`
       : "";
 
-    if (parts.length === 0 && !weaknessHint) return "";
+    // ドットーレの観察メモ
+    const observationHint = p.botRecord.observation
+      ? `ドットーレによる人物評価：「${p.botRecord.observation}」`
+      : "";
+
+    if (parts.length === 0 && !weaknessHint && !observationHint) return "";
 
     const baseHint = parts.length > 0 ? `【この被検体の記録】${parts.join("、")}。` : "";
-    return [baseHint, weaknessHint].filter(Boolean).join("\n");
+    return [baseHint, observationHint, weaknessHint].filter(Boolean).join("\n");
   }
 }
 

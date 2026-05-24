@@ -107,6 +107,39 @@ const vcHandler = new VCHandler(config);
 const profileManager = new ProfileManager();
 const targetChannelIds = new Set(config.discord.targetChannelIds);
 
+// ─── 観察メモ更新（5会話ごと or 重要イベント時、クールダウン付き）────────────
+const observationCooldowns = new Map(); // userId → lastUpdateTimestamp
+
+async function updateObservation(userId, userMessage, aiReply) {
+  const COOLDOWN_MS = 3 * 60 * 1000; // 3分以内の連続更新は無視
+  const now = Date.now();
+  if ((observationCooldowns.get(userId) ?? 0) + COOLDOWN_MS > now) return;
+  observationCooldowns.set(userId, now);
+
+  const profile = profileManager.profiles[userId];
+  if (!profile) return;
+  const existing = profile.botRecord.observation ?? "（未記録）";
+
+  const prompt =
+    `以下は研究対象との最新のやりとりだ。このデータをもとに被検体の人物像・行動傾向・特性に関する観察記録を更新せよ。\n\n` +
+    `現在の記録：「${existing}」\n` +
+    `被検体の発言：「${userMessage.slice(0, 300)}」\n` +
+    `（参考）ドットーレの返答：「${aiReply.slice(0, 150)}」\n\n` +
+    `出力形式：1〜2文の観察メモのみ出力すること（説明・前置き・ドットーレの台詞は不要）。` +
+    `研究者視点で淡々と記述、感情語・主観的評価禁止。` +
+    `観察可能な事実・傾向・パターンのみ（例：「深夜に出現する傾向がある」「自己否定的な発言が多い」「感情表現を避ける傾向が見られる」）。` +
+    `既存記録がある場合は統合・要約してよい。`;
+
+  try {
+    const observation = await aiHandler.generateSimple(prompt, 150);
+    profileManager.setObservation(userId, observation);
+    console.log(`[Bot] 観察記録更新 [${userId}]: ${observation.slice(0, 60)}`);
+  } catch (err) {
+    console.error("[Bot] 観察記録更新エラー:", err.message);
+    observationCooldowns.delete(userId); // 失敗時はクールダウンリセット
+  }
+}
+
 // 一人になったときの退出タイマー
 let aloneTimer = null;
 let listenCallback = null;
@@ -1186,6 +1219,12 @@ client.on("messageCreate", async (message) => {
       }
     }
     console.log(`[Bot] 返答送信完了 [${userTag}]`);
+
+    // 観察メモ更新（5会話ごと or ネガティブ/生存イベント時）
+    const msgCount = profileManager.profiles[userId]?.botRecord?.messageCount ?? 0;
+    if (negative || survival || msgCount % 5 === 0) {
+      updateObservation(userId, content, reply).catch(() => {});
+    }
 
     // VCに接続中なら音声も再生（AI返答テキストでマッチング・非同期）
     if (vcHandler.isConnected()) {

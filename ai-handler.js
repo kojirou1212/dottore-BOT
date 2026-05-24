@@ -176,6 +176,38 @@ class AIHandler {
       throw error;
     }
   }
+
+  // 履歴なし・低トークンの単発呼び出し（観察メモ生成用）
+  async generateSimple(prompt, maxTokens = 150) {
+    const model = this.config.gemini.fallbackModel || this.config.gemini.model;
+    const apiKey = this.config.gemini.apiKey;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    return this._callWithRetry(async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: { maxOutputTokens: maxTokens },
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const data = await res.json();
+      if (data.error) throw new Error(`API error ${data.error.code}: ${data.error.message ?? ""}`);
+      const text = data.candidates?.[0]?.content?.parts
+        ?.find((p) => typeof p.text === "string")?.text?.trim();
+      if (!text) throw new Error("空応答");
+      return text;
+    }, 1);
+  }
 }
 
 module.exports = AIHandler;
