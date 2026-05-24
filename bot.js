@@ -853,6 +853,9 @@ client.on("messageCreate", async (message) => {
   const content = message.content.trim();
   if (!content) return;
 
+  // プロフィール更新（コマンド含む全メッセージでカウント・最終観測更新）
+  profileManager.onMessage(userId, userTag);
+
   const isVCCommand =
     content === "!kanshi" ||
     content.startsWith("!kanshi ") ||
@@ -991,7 +994,7 @@ client.on("messageCreate", async (message) => {
       }
       const field = rest.slice(0, spaceIdx);
       const value = rest.slice(spaceIdx + 1).trim();
-      const ok = profileManager.setField(userId, field, value);
+      const ok = profileManager.setField(userId, field, value, userTag);
       await message.reply(ok
         ? `……「${field}」を「${value}」として記録した。`
         : `……「${field}」は不明なフィールドだ。呼び名・年齢・状態・備考 から指定しろ。`
@@ -1151,9 +1154,6 @@ client.on("messageCreate", async (message) => {
 
   // ── AI 応答 ───────────────────────────────────────────────────
   console.log(`[Bot] メッセージ受信 [${userTag}]: ${content.slice(0, 80)}`);
-
-  // プロフィール更新（メッセージカウント・最終観測）
-  profileManager.onMessage(userId, userTag);
 
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});

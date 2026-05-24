@@ -83,10 +83,10 @@ class ProfileManager {
   }
 
   // フィールドをセット（日本語キーまたは内部キーどちらでも可）
-  setField(userId, rawField, value) {
-    const p = this.profiles[userId];
-    if (!p) return false;
-    const field = FIELD_MAP[rawField] ?? (Object.prototype.hasOwnProperty.call(FIELD_LABELS, rawField) ? rawField : null);
+  setField(userId, rawField, value, displayName = "") {
+    const p = this._getOrCreate(userId, displayName); // 未作成でも初期化
+    const key = rawField.normalize("NFC").trim();
+    const field = FIELD_MAP[key] ?? (Object.prototype.hasOwnProperty.call(FIELD_LABELS, key) ? key : null);
     if (!field) return false;
     p.userFields[field] = value.trim();
     this.save();
@@ -97,7 +97,8 @@ class ProfileManager {
   clearField(userId, rawField) {
     const p = this.profiles[userId];
     if (!p) return false;
-    const field = FIELD_MAP[rawField] ?? (Object.prototype.hasOwnProperty.call(FIELD_LABELS, rawField) ? rawField : null);
+    const key = rawField.normalize("NFC").trim();
+    const field = FIELD_MAP[key] ?? (Object.prototype.hasOwnProperty.call(FIELD_LABELS, key) ? key : null);
     if (!field) return false;
     p.userFields[field] = null;
     this.save();
