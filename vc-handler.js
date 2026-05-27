@@ -293,30 +293,27 @@ ${soundList}
 
 他の文字は含めないでください。数字・縦棒・日本語のみです。`;
 
-    const callGemini = async (model) => {
-      const apiKey = this.config.gemini.apiKey;
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-      const res = await fetch(url, {
+    const callGrok = async (model) => {
+      const apiKey = this.config.grok.apiKey;
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            maxOutputTokens: 30,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
+          model,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 30,
         }),
       });
 
       const data = await res.json();
 
-      if (data.error) {
-        const code = data.error.code;
-        const msg = data.error.message ?? "";
-        if (code === 503 || msg.includes("high demand") || msg.includes("UNAVAILABLE")) {
-          throw new Error(`503: ${msg}`);
-        }
+      if (!res.ok) {
+        const msg = data.error?.message ?? res.statusText;
+        const code = res.status;
+        if (code === 503 || code === 429) throw new Error(`${code}: ${msg}`);
         console.error(`[VCHandler] API エラー: ${code} - ${msg}`);
         return null;
       }
@@ -325,10 +322,8 @@ ${soundList}
     };
 
     const parseResponse = (data) => {
-      const candidate = data.candidates?.[0];
-      const parts = candidate?.content?.parts ?? [];
-      const raw = (parts.find((p) => !p.thought && typeof p.text === "string")?.text ?? "").trim();
-      console.log(`[VCHandler] finishReason: ${candidate?.finishReason ?? "不明"} / AI生応答: "${raw}"`);
+      const raw = (data.choices?.[0]?.message?.content ?? "").trim();
+      console.log(`[VCHandler] AI生応答: "${raw}"`);
 
       const [indexPart, thought = ""] = raw.split("|");
       const index = parseInt(indexPart.trim(), 10);
@@ -342,16 +337,16 @@ ${soundList}
     };
 
     try {
-      const primaryModel = this.config.gemini.model;
+      const primaryModel = this.config.grok.model;
       let data = null;
 
       try {
-        data = await callGemini(primaryModel);
+        data = await callGrok(primaryModel);
       } catch (primaryErr) {
-        const fallbackModel = this.config.gemini.fallbackModel;
+        const fallbackModel = this.config.grok.fallbackModel;
         if (fallbackModel) {
           console.warn(`[VCHandler] プライマリモデル失敗。フォールバック: ${fallbackModel}`);
-          data = await callGemini(fallbackModel);
+          data = await callGrok(fallbackModel);
         }
       }
 
@@ -596,64 +591,35 @@ ${soundList}
     this._activeStreams.clear();
   }
 
-  // ── Gemini Audio API による文字起こし ────────────────────────────────────
+  // ── OpenAI Whisper API による文字起こし ──────────────────────────────────
   async _transcribeAudio(wavBuffer) {
-    const apiKey = this.config.gemini.apiKey;
-
-    const callSTT = async (model) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-      let res;
-      try {
-        res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{
-              role: "user",
-              parts: [
-                { inlineData: { mimeType: "audio/wav", data: wavBuffer.toString("base64") } },
-                { text: 'Transcribe the Japanese speech in this audio. Output only the spoken words in Japanese. If the audio contains silence, noise, breathing, or unclear/inaudible speech, output exactly: SILENT' },
-              ],
-            }],
-            generationConfig: { maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } },
-          }),
-        });
-      } finally {
-        clearTimeout(timeoutId);
-      }
-      const data = await res.json();
-      if (data.error) {
-        const msg = data.error.message ?? "";
-        const code = data.error.code;
-        if (code === 503 || msg.includes("high demand") || msg.includes("UNAVAILABLE")) {
-          throw new Error(`503: ${msg}`);
-        }
-        throw new Error(`STT API error: ${msg}`);
-      }
-      const parts = data.candidates?.[0]?.content?.parts ?? [];
-      return parts.find((p) => !p.thought && typeof p.text === "string")?.text?.trim() ?? null;
-    };
-
-    const primaryModel = this.config.gemini.model;
-    let raw = null;
+    const apiKey = this.config.openai.apiKey;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    let res;
     try {
-      raw = await callSTT(primaryModel);
-    } catch (primaryErr) {
-      const msg = primaryErr.message ?? "";
-      const fallbackModel = this.config.gemini.fallbackModel;
-      if (fallbackModel && (msg.includes("503") || msg.includes("UNAVAILABLE"))) {
-        console.warn(`[VCHandler] STTプライマリ失敗。フォールバック: ${fallbackModel}`);
-        raw = await callSTT(fallbackModel);
-      } else {
-        throw primaryErr;
-      }
+      const formData = new FormData();
+      const blob = new Blob([wavBuffer], { type: "audio/wav" });
+      formData.append("file", blob, "audio.wav");
+      formData.append("model", "whisper-1");
+      formData.append("language", "ja");
+
+      res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}` },
+        signal: controller.signal,
+        body: formData,
+      });
+    } finally {
+      clearTimeout(timeoutId);
     }
 
-    if (!raw || raw.toUpperCase() === "SILENT") return null;
-    return raw;
+    const data = await res.json();
+    if (!res.ok) throw new Error(`Whisper API error: ${data.error?.message ?? res.statusText}`);
+
+    const text = data.text?.trim();
+    if (!text || text.length < 2) return null;
+    return text;
   }
 }
 

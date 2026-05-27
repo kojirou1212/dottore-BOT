@@ -61,6 +61,9 @@ if (!config.grok.apiKey) {
   console.error("[Bot] Grok API キーが設定されていません。");
   process.exit(1);
 }
+if (!config.openai?.apiKey) {
+  console.warn("[Bot] OpenAI API キーが未設定です。VC音声認識（STT）は無効になります。");
+}
 
 // ─── 動作モード ────────────────────────────────────────────────────────────
 const BOT_MODE = (process.env.BOT_MODE || "all").trim();
