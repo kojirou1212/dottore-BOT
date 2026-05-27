@@ -591,34 +591,38 @@ ${soundList}
     this._activeStreams.clear();
   }
 
-  // ── OpenAI Whisper API による文字起こし ──────────────────────────────────
+  // ── Gemini API による文字起こし ──────────────────────────────────────────
   async _transcribeAudio(wavBuffer) {
-    const apiKey = this.config.openai.apiKey;
+    const apiKey = this.config.gemini.apiKey;
+    const model = this.config.gemini.sttModel || "gemini-1.5-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     let res;
     try {
-      const formData = new FormData();
-      const blob = new Blob([wavBuffer], { type: "audio/wav" });
-      formData.append("file", blob, "audio.wav");
-      formData.append("model", "whisper-1");
-      formData.append("language", "ja");
-
-      res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      res = await fetch(url, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${apiKey}` },
+        headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: formData,
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: "この音声を日本語でそのまま文字起こしして。音声がない場合はSILENTとだけ返して。" },
+              { inline_data: { mime_type: "audio/wav", data: wavBuffer.toString("base64") } },
+            ],
+          }],
+        }),
       });
     } finally {
       clearTimeout(timeoutId);
     }
 
     const data = await res.json();
-    if (!res.ok) throw new Error(`Whisper API error: ${data.error?.message ?? res.statusText}`);
+    if (!res.ok) throw new Error(`Gemini STT error: ${data.error?.message ?? res.statusText}`);
 
-    const text = data.text?.trim();
-    if (!text || text.length < 2) return null;
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text || text.toUpperCase() === "SILENT") return null;
     return text;
   }
 }
