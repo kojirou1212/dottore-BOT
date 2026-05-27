@@ -20,11 +20,12 @@ if (process.env.DISCORD_TOKEN) {
         : [],
       voiceChannelId: process.env.VOICE_CHANNEL_ID || "",
     },
-    gemini: {
-      apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-      maxTokens: parseInt(process.env.MAX_TOKENS || "1000", 10),
-      maxHistoryLength: parseInt(process.env.MAX_HISTORY_LENGTH || "10", 10),
+    grok: {
+      apiKey: process.env.GROK_API_KEY,
+      model: process.env.GROK_MODEL || "grok-3",
+      fallbackModel: process.env.GROK_FALLBACK_MODEL || "grok-3-mini",
+      maxTokens: parseInt(process.env.MAX_TOKENS || "500", 10),
+      maxHistoryLength: parseInt(process.env.MAX_HISTORY_LENGTH || "30", 10),
     },
     ai: {
       systemPrompt: process.env.SYSTEM_PROMPT || "You are a helpful assistant.",
@@ -45,8 +46,8 @@ if (!config.discord.token) {
   console.error("[Bot] Discord トークンが設定されていません。");
   process.exit(1);
 }
-if (!config.gemini.apiKey) {
-  console.error("[Bot] Gemini API キーが設定されていません。");
+if (!config.grok.apiKey) {
+  console.error("[Bot] Grok API キーが設定されていません。");
   process.exit(1);
 }
 
@@ -719,7 +720,7 @@ function startScheduler() {
 client.once("clientReady", async () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
   console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
-  console.log(`[Bot] 使用モデル: ${config.gemini.model}`);
+  console.log(`[Bot] 使用モデル: ${config.grok.model}`);
   resetDailyMood();
   startScheduler();
   await autoRejoinVC();

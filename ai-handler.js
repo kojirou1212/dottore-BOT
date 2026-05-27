@@ -23,17 +23,11 @@ class AIHandler {
     return count;
   }
 
-  // 履歴が user/model 交互・各エントリが有効かを検証・修復する
+  // 履歴が user/assistant 交互・各エントリが有効かを検証・修復する
   sanitizeHistory(history) {
     for (let i = history.length - 1; i >= 0; i--) {
       const entry = history[i];
-      if (
-        !entry.parts ||
-        !Array.isArray(entry.parts) ||
-        entry.parts.length === 0 ||
-        !entry.parts[0].text ||
-        entry.parts[0].text.trim() === ""
-      ) {
+      if (!entry.content || typeof entry.content !== "string" || entry.content.trim() === "") {
         history.splice(i, 1);
       }
     }
@@ -50,7 +44,7 @@ class AIHandler {
     }
   }
 
-  // 503など一時的エラー用リトライ付きAPI呼び出し
+  // 503/429など一時的エラー用リトライ付きAPI呼び出し
   async _callWithRetry(fn, maxRetries = 3) {
     let lastError;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -64,6 +58,7 @@ class AIHandler {
           msg.includes("UNAVAILABLE") ||
           msg.includes("high demand") ||
           msg.includes("429") ||
+          msg.includes("rate_limit") ||
           msg.includes("Resource has been exhausted");
 
         if (!isRetryable || attempt === maxRetries) break;
@@ -83,9 +78,9 @@ class AIHandler {
       history.pop();
     }
 
-    history.push({ role: "user", parts: [{ text: userMessage }] });
+    history.push({ role: "user", content: userMessage });
 
-    const maxLen = this.config.gemini.maxHistoryLength;
+    const maxLen = this.config.grok.maxHistoryLength;
     while (history.length > maxLen) {
       history.shift();
     }
@@ -93,27 +88,31 @@ class AIHandler {
     this.sanitizeHistory(history);
 
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-    const systemPromptWithTime = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}${systemHint ? `\n\n${systemHint}` : ""}`;
+    const systemContent = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}${systemHint ? `\n\n${systemHint}` : ""}`;
+    const apiKey = this.config.grok.apiKey;
+    const url = "https://api.x.ai/v1/chat/completions";
     const chatHistory = history.slice(0, -1);
-    const apiKey = this.config.gemini.apiKey;
 
-    const callGemini = async (model) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const callGrok = async (model) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       let res;
       try {
         res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
           signal: controller.signal,
           body: JSON.stringify({
-            system_instruction: { parts: [{ text: systemPromptWithTime }] },
-            contents: [...chatHistory, { role: "user", parts: [{ text: userMessage }] }],
-            generationConfig: {
-              maxOutputTokens: this.config.gemini.maxTokens,
-              thinkingConfig: { thinkingBudget: 0 },
-            },
+            model,
+            messages: [
+              { role: "system", content: systemContent },
+              ...chatHistory,
+              { role: "user", content: userMessage },
+            ],
+            max_tokens: this.config.grok.maxTokens,
           }),
         });
       } finally {
@@ -121,27 +120,19 @@ class AIHandler {
       }
 
       const data = await res.json();
-      if (data.error) {
-        const code = data.error.code;
-        const msg = data.error.message ?? "";
-        if (code === 503 || msg.includes("high demand") || msg.includes("UNAVAILABLE")) {
-          throw new Error(`503: ${msg}`);
-        }
+      if (!res.ok) {
+        const msg = data.error?.message ?? res.statusText;
+        const code = res.status;
+        if (code === 503 || code === 429) throw new Error(`${code}: ${msg}`);
         throw new Error(`API error ${code}: ${msg}`);
       }
 
-      const candidate = data.candidates?.[0];
-      const parts = candidate?.content?.parts ?? [];
-      // thought パーツ（thinking mode）を除いた最初のテキストパーツを取得
-      const textPart = parts.find((p) => !p.thought && typeof p.text === "string");
-      const text = textPart?.text?.trim();
-
+      const text = data.choices?.[0]?.message?.content?.trim();
       if (!text) {
-        const finishReason = candidate?.finishReason ?? "UNKNOWN";
-        console.warn(`[AIHandler] 空応答 finishReason=${finishReason} parts=${JSON.stringify(parts.map(p => ({ thought: !!p.thought, textLen: p.text?.length ?? 0 })))}`);
-        if (finishReason === "SAFETY") return "……(その話題には応答できない)";
-        if (finishReason === "RECITATION") return "……(著作権の都合で応答できない)";
-        throw new Error(`AIからの応答が空でした。(finishReason=${finishReason})`);
+        const finishReason = data.choices?.[0]?.finish_reason ?? "UNKNOWN";
+        console.warn(`[AIHandler] 空応答 finish_reason=${finishReason}`);
+        if (finishReason === "content_filter") return "……(その話題には応答できない)";
+        throw new Error(`AIからの応答が空でした。(finish_reason=${finishReason})`);
       }
 
       return text;
@@ -151,21 +142,25 @@ class AIHandler {
       let assistantMessage;
 
       try {
-        assistantMessage = await this._callWithRetry(() => callGemini(this.config.gemini.model));
+        assistantMessage = await this._callWithRetry(() => callGrok(this.config.grok.model));
       } catch (primaryErr) {
         const msg = primaryErr.message || "";
-        const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand");
-        const fallbackModel = this.config.gemini.fallbackModel;
+        const isUnavailable =
+          msg.includes("503") ||
+          msg.includes("UNAVAILABLE") ||
+          msg.includes("429") ||
+          msg.includes("rate_limit");
+        const fallbackModel = this.config.grok.fallbackModel;
 
         if (isUnavailable && fallbackModel) {
           console.warn(`[AIHandler] プライマリモデル失敗。フォールバック: ${fallbackModel}`);
-          assistantMessage = await this._callWithRetry(() => callGemini(fallbackModel));
+          assistantMessage = await this._callWithRetry(() => callGrok(fallbackModel));
         } else {
           throw primaryErr;
         }
       }
 
-      history.push({ role: "model", parts: [{ text: assistantMessage }] });
+      history.push({ role: "assistant", content: assistantMessage });
       return assistantMessage;
 
     } catch (error) {
@@ -179,9 +174,9 @@ class AIHandler {
 
   // 履歴なし・低トークンの単発呼び出し（観察メモ生成用）
   async generateSimple(prompt, maxTokens = 150) {
-    const model = this.config.gemini.fallbackModel || this.config.gemini.model;
-    const apiKey = this.config.gemini.apiKey;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const model = this.config.grok.fallbackModel || this.config.grok.model;
+    const apiKey = this.config.grok.apiKey;
+    const url = "https://api.x.ai/v1/chat/completions";
 
     return this._callWithRetry(async () => {
       const controller = new AbortController();
@@ -190,20 +185,23 @@ class AIHandler {
       try {
         res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
           signal: controller.signal,
           body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: maxTokens },
+            model,
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: maxTokens,
           }),
         });
       } finally {
         clearTimeout(timeoutId);
       }
       const data = await res.json();
-      if (data.error) throw new Error(`API error ${data.error.code}: ${data.error.message ?? ""}`);
-      const text = data.candidates?.[0]?.content?.parts
-        ?.find((p) => typeof p.text === "string")?.text?.trim();
+      if (!res.ok) throw new Error(`API error ${res.status}: ${data.error?.message ?? res.statusText}`);
+      const text = data.choices?.[0]?.message?.content?.trim();
       if (!text) throw new Error("空応答");
       return text;
     }, 1);
