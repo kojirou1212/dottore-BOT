@@ -486,6 +486,7 @@ ${soundList}
     const receiver = this.connection.receiver;
 
     this._speakingHandler = (userId) => {
+      console.log(`[VCHandler] speaking.start: userId=${userId} isPlaying=${this.isPlaying} activeStreams=${this._activeStreams.size} cooldownRem=${Math.max(0, this._cooldownMs - (Date.now() - this._lastResponseTime))}ms`);
       if (this.isPlaying || this._recentlyPlayed) return;
       if (this._activeStreams.size > 0) return;
       if (Date.now() - this._lastResponseTime < this._cooldownMs) return;
