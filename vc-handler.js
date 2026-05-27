@@ -592,38 +592,55 @@ ${soundList}
   }
 
   // ── Gemini API による文字起こし ──────────────────────────────────────────
-  async _transcribeAudio(wavBuffer) {
+  async _transcribeAudio(wavBuffer, maxRetries = 3) {
     const apiKey = this.config.gemini.apiKey;
     const model = this.config.gemini.sttModel || "gemini-1.5-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const bodyJson = JSON.stringify({
+      contents: [{
+        parts: [
+          { text: "この音声を日本語でそのまま文字起こしして。音声がない場合はSILENTとだけ返して。" },
+          { inline_data: { mime_type: "audio/wav", data: wavBuffer.toString("base64") } },
+        ],
+      }],
+    });
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    let res;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: "この音声を日本語でそのまま文字起こしして。音声がない場合はSILENTとだけ返して。" },
-              { inline_data: { mime_type: "audio/wav", data: wavBuffer.toString("base64") } },
-            ],
-          }],
-        }),
-      });
-    } finally {
-      clearTimeout(timeoutId);
+    let lastError;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: bodyJson,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = data.error?.message ?? res.statusText;
+        const isRetryable = res.status === 503 || res.status === 429 ||
+          msg.includes("high demand") || msg.includes("rate") || msg.includes("quota");
+        lastError = new Error(`Gemini STT error: ${msg}`);
+        if (isRetryable && attempt < maxRetries) {
+          const waitMs = (2 ** attempt) * 1000 + Math.random() * 500;
+          console.warn(`[VCHandler] STTリトライ ${attempt + 1}/${maxRetries} (${Math.round(waitMs)}ms後)`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        throw lastError;
+      }
+
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!text || text.toUpperCase() === "SILENT") return null;
+      return text;
     }
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(`Gemini STT error: ${data.error?.message ?? res.statusText}`);
-
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!text || text.toUpperCase() === "SILENT") return null;
-    return text;
+    throw lastError;
   }
 }
 
