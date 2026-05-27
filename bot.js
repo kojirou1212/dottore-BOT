@@ -530,21 +530,30 @@ function scheduleVCIdle() {
 function makeListenCallback() {
   return async (speakerId, transcript) => {
     try {
+      const ttsBotIds = config.discord.ttsBotIds ?? [];
+      const speakerUser = client.users.cache.get(speakerId);
+      const isTtsBot = speakerUser?.bot === true && ttsBotIds.includes(speakerId);
+
+      // ボット判定：ttsBotIdsに登録されていないボットは無視
+      if (speakerUser?.bot && !isTtsBot) return;
+
       // ① 集中モード中は完全スキップ
       if (isFocused) {
         console.log(`[Bot] 集中モード中スキップ [${speakerId}]`);
         return;
       }
 
-      // 気のせいかモード：一時無視中なら完全スキップ
-      const ignoreUntil = ignoredUsers.get(speakerId);
-      if (ignoreUntil) {
-        if (Date.now() < ignoreUntil) {
-          console.log(`[Bot] 一時無視中 [${speakerId}]`);
-          return;
+      // 気のせいかモード：一時無視中なら完全スキップ（読み上げBOTは対象外）
+      if (!isTtsBot) {
+        const ignoreUntil = ignoredUsers.get(speakerId);
+        if (ignoreUntil) {
+          if (Date.now() < ignoreUntil) {
+            console.log(`[Bot] 一時無視中 [${speakerId}]`);
+            return;
+          }
+          ignoredUsers.delete(speakerId);
+          userResponseTrack.delete(speakerId);
         }
-        ignoredUsers.delete(speakerId);
-        userResponseTrack.delete(speakerId);
       }
 
       // 鼻歌検知：内容のない音は無視
@@ -561,8 +570,8 @@ function makeListenCallback() {
       const humanCount = currentVCChannel?.members?.filter((m) => !m.user.bot).size ?? 1;
       const currentSkipRate = getSkipRate(humanCount);
 
-      // ② 連続発言チェック（キーワードありは免除）
-      if (!hasKeyword) {
+      // ② 連続発言チェック（読み上げBOTは対象外）
+      if (!hasKeyword && !isTtsBot) {
         const now = Date.now();
         const speaker = recentSpeakers.get(speakerId) ?? { count: 0, lastTime: 0 };
         speaker.count = (now - speaker.lastTime < 2 * 60 * 1000) ? speaker.count + 1 : 1;
@@ -585,9 +594,10 @@ function makeListenCallback() {
         }
       }
 
-      // 疲労・人数・時間帯・機嫌によるスキップ（キーワードありは免除）
-      if (!hasKeyword && Math.random() < currentSkipRate) {
-        console.log(`[Bot] 音声入力スキップ [${speakerId}] humanCount=${humanCount} skipRate=${Math.round(currentSkipRate * 100)}%`);
+      // 疲労・人数・時間帯・機嫌によるスキップ（読み上げBOTは固定50%、キーワードありは免除）
+      const effectiveSkipRate = isTtsBot ? 0.10 : currentSkipRate;
+      if (!hasKeyword && Math.random() < effectiveSkipRate) {
+        console.log(`[Bot] 音声入力スキップ [${speakerId}]${isTtsBot ? " (TTS)" : ""} skipRate=${Math.round(effectiveSkipRate * 100)}%`);
         return;
       }
 
