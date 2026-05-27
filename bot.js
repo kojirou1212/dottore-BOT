@@ -46,6 +46,17 @@ if (!config.discord.token) {
   console.error("[Bot] Discord トークンが設定されていません。");
   process.exit(1);
 }
+
+// systemPromptFile が指定されていればファイルから読み込む
+if (config.ai.systemPromptFile) {
+  const promptPath = path.join(__dirname, config.ai.systemPromptFile);
+  if (!fs.existsSync(promptPath)) {
+    console.error(`[Bot] systemPromptFile が見つかりません: ${promptPath}`);
+    process.exit(1);
+  }
+  config.ai.systemPrompt = fs.readFileSync(promptPath, "utf-8").trim();
+  console.log(`[Bot] システムプロンプト読み込み完了: ${config.ai.systemPromptFile}`);
+}
 if (!config.grok.apiKey) {
   console.error("[Bot] Grok API キーが設定されていません。");
   process.exit(1);
