@@ -531,11 +531,11 @@ function makeListenCallback() {
   return async (speakerId, transcript) => {
     try {
       const ttsBotIds = config.discord.ttsBotIds ?? [];
+      const isTtsBot = ttsBotIds.includes(speakerId);
       const speakerUser = client.users.cache.get(speakerId);
-      const isTtsBot = speakerUser?.bot === true && ttsBotIds.includes(speakerId);
 
       // ボット判定：ttsBotIdsに登録されていないボットは無視
-      if (speakerUser?.bot && !isTtsBot) return;
+      if (!isTtsBot && speakerUser?.bot === true) return;
 
       // ① 集中モード中は完全スキップ
       if (isFocused) {
@@ -616,8 +616,8 @@ function makeListenCallback() {
       scheduleVCIdle();
       const responseResult = await vcHandler.respondToMessage(transcript);
 
-      // 同一応答リピート検出（2分間に3回同じ応答→気のせいかモード）
-      if (responseResult) {
+      // 同一応答リピート検出（2分間に3回同じ応答→気のせいかモード）読み上げBOTは対象外
+      if (responseResult && !isTtsBot) {
         const responseKey = responseResult.sounds?.map((s) => s.name).join(",") ?? "";
         const now = Date.now();
         const prev = userResponseTrack.get(speakerId);
