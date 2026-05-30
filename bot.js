@@ -293,6 +293,15 @@ async function handleProfilePost(message) {
     const reply = PROFILE_REG_REPLIES[Math.floor(Math.random() * PROFILE_REG_REPLIES.length)];
     await message.reply(reply);
   } catch (_) {}
+
+  // 被検体ロール付与
+  try {
+    const member = message.member ?? await message.guild.members.fetch(userId);
+    await member.roles.add("1510283895755505856");
+    console.log(`[Bot] 被検体ロール付与 [${userTag}]`);
+  } catch (err) {
+    console.error(`[Bot] ロール付与失敗 [${userTag}]:`, err.message);
+  }
 }
 
 // 一人になったときの退出タイマー
