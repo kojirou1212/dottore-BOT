@@ -129,6 +129,10 @@ const profileChannelIds = new Set(
   (config.discord.profileChannelId || "")
     .split(",").map(s => s.trim()).filter(Boolean)
 );
+const loreChannelIds = new Set(
+  (config.discord.loreChannelId || "")
+    .split(",").map(s => s.trim()).filter(Boolean)
+);
 
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
@@ -311,6 +315,52 @@ async function handleProfilePost(message) {
     console.log(`[Bot] 被検体ロール付与 [${userTag}]`);
   } catch (err) {
     console.error(`[Bot] ロール付与失敗 [${userTag}]:`, err.message);
+  }
+}
+
+async function handleLoreCommand(message) {
+  const rawContent = message.content.trim();
+  const args = rawContent.slice("!lore".length).trim();
+  const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+
+  if (!args) {
+    const cats = knowledgeBase.listLoreCategories();
+    if (cats.length === 0) {
+      await message.reply("……まだ何も登録されていない。");
+    } else {
+      await message.reply(`【登録済み知識】\n${cats.map(c => `・${c}`).join("\n")}`);
+    }
+    return;
+  }
+
+  if (args.startsWith("set ") && isAdmin) {
+    const rest = args.slice("set ".length).trim();
+    const spaceIdx = rest.search(/\s/);
+    if (spaceIdx === -1) { await message.reply("……カテゴリと内容を両方指定しろ。"); return; }
+    const cat = rest.slice(0, spaceIdx).trim();
+    const loreContent = rest.slice(spaceIdx + 1).trim();
+    knowledgeBase.setLore(cat, loreContent);
+    await message.reply(`……「${cat}」を記録した。`);
+    return;
+  }
+
+  if (args.startsWith("delete ") && isAdmin) {
+    const cat = args.slice("delete ".length).trim();
+    const ok = knowledgeBase.deleteLore(cat);
+    await message.reply(ok ? `……「${cat}」を削除した。` : `……「${cat}」は存在しない。`);
+    return;
+  }
+
+  if (args.startsWith("set ") || args.startsWith("delete ")) {
+    await message.reply("……管理者権限が必要だ。");
+    return;
+  }
+
+  const entry = knowledgeBase.getLore(args);
+  if (!entry) {
+    await message.reply(`……「${args}」というカテゴリは存在しない。`);
+  } else {
+    await message.reply(`【${args}】\n${entry.content}\n（更新: ${entry.updatedAt}）`);
   }
 }
 
@@ -1246,10 +1296,22 @@ client.on("messageCreate", async (message) => {
   const isProfileCh = profileChannelIds.size > 0
     && profileChannelIds.has(message.channelId)
     && !isTarget;
+  const isLoreCh = loreChannelIds.size > 0
+    && loreChannelIds.has(message.channelId)
+    && !isTarget;
 
   // プロフィールチャンネル：ユーザー基本情報を保管
   if (isProfileCh) {
     await handleProfilePost(message);
+    return;
+  }
+
+  // 資料室チャンネル：!lore コマンドのみ受け付ける
+  if (isLoreCh) {
+    const c = message.content.trim();
+    if (c === "!lore" || c.startsWith("!lore ")) {
+      await handleLoreCommand(message);
+    }
     return;
   }
 
@@ -1419,49 +1481,7 @@ client.on("messageCreate", async (message) => {
 
   // ── !lore ─────────────────────────────────────────────────────
   if (content === "!lore" || content.startsWith("!lore ")) {
-    const args = content.slice("!lore".length).trim();
-    const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-
-    if (!args) {
-      const cats = knowledgeBase.listLoreCategories();
-      if (cats.length === 0) {
-        await message.reply("……まだ何も登録されていない。");
-      } else {
-        await message.reply(`【登録済み知識】\n${cats.map(c => `・${c}`).join("\n")}`);
-      }
-      return;
-    }
-
-    if (args.startsWith("set ") && isAdmin) {
-      const rest = args.slice("set ".length).trim();
-      const spaceIdx = rest.search(/\s/);
-      if (spaceIdx === -1) { await message.reply("……カテゴリと内容を両方指定しろ。"); return; }
-      const cat = rest.slice(0, spaceIdx).trim();
-      const content2 = rest.slice(spaceIdx + 1).trim();
-      knowledgeBase.setLore(cat, content2);
-      await message.reply(`……「${cat}」を記録した。`);
-      return;
-    }
-
-    if (args.startsWith("delete ") && isAdmin) {
-      const cat = args.slice("delete ".length).trim();
-      const ok = knowledgeBase.deleteLore(cat);
-      await message.reply(ok ? `……「${cat}」を削除した。` : `……「${cat}」は存在しない。`);
-      return;
-    }
-
-    if (args.startsWith("set ") || args.startsWith("delete ")) {
-      await message.reply("……管理者権限が必要だ。");
-      return;
-    }
-
-    // カテゴリ指定
-    const entry = knowledgeBase.getLore(args);
-    if (!entry) {
-      await message.reply(`……「${args}」というカテゴリは存在しない。`);
-    } else {
-      await message.reply(`【${args}】\n${entry.content}\n（更新: ${entry.updatedAt}）`);
-    }
+    await handleLoreCommand(message);
     return;
   }
 
