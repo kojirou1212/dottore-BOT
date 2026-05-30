@@ -1484,6 +1484,17 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
+  // ── !say（前処理：前方一致コマンド）──────────────────────────────
+  if (content.startsWith("!say ") || content === "!say") {
+    const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+    if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+    const sayText = content.slice("!say".length).trim();
+    if (!sayText) { await message.reply("送信するテキストを入力しろ。"); return; }
+    try { await message.delete(); } catch (_) {}
+    await message.channel.send(sayText);
+    return;
+  }
+
   // ── コマンド ─────────────────────────────────────────────────
   switch (content) {
     case "!owari":
@@ -1599,18 +1610,6 @@ client.on("messageCreate", async (message) => {
       } else {
         await message.reply("……読み込みに失敗した。messages.json の構文を確認しろ。");
       }
-      return;
-    }
-
-    case "!say": {
-      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
-      const sayText = content.slice("!say".length).trim();
-      if (!sayText) { await message.reply("送信するテキストを入力しろ。"); return; }
-      try {
-        await message.delete();
-      } catch (_) {}
-      await message.channel.send(sayText);
       return;
     }
 
