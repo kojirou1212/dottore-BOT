@@ -1446,25 +1446,7 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // !profile reset → 記入欄リセット
-    if (args === "reset") {
-      const ok = profileManager.resetUserFields(userId);
-      await message.reply(ok ? "……記入欄をリセットした。また書き直せ。" : "……お前の記録がない。");
-      return;
-    }
-
-    // !profile clear [フィールド] → フィールド消去
-    if (args.startsWith("clear ")) {
-      const field = args.slice("clear ".length).trim();
-      const ok = profileManager.clearField(userId, field);
-      await message.reply(ok
-        ? `……「${field}」を消去した。`
-        : `……「${field}」は存在しないフィールドだ。呼び名・年齢・状態・備考 から指定しろ。`
-      );
-      return;
-    }
-
-    // !profile set [フィールド] [値]
+    // !profile set [フィールド] [値]（呼び名・備考のみ）
     if (args.startsWith("set ")) {
       const rest = args.slice("set ".length).trim();
       const spaceIdx = rest.search(/\s/);
@@ -1474,20 +1456,27 @@ client.on("messageCreate", async (message) => {
       }
       const field = rest.slice(0, spaceIdx);
       const value = rest.slice(spaceIdx + 1).trim();
+      const ALLOWED_FIELDS = ["呼び名", "備考"];
+      if (!ALLOWED_FIELDS.includes(field)) {
+        await message.reply(`……「${field}」は設定できない。呼び名・備考 のみ指定可能だ。`);
+        return;
+      }
       const ok = profileManager.setField(userId, field, value, userTag);
       await message.reply(ok
         ? `……「${field}」を「${value}」として記録した。`
-        : `……「${field}」は不明なフィールドだ。呼び名・年齢・状態・備考 から指定しろ。`
+        : `……記録に失敗した。`
       );
       return;
     }
 
-    await message.reply("……使い方が間違っている。\n`!profile` … 表示\n`!profile set 呼び名 [名前]` … 記入\n`!profile clear [フィールド]` … 消去\n`!profile reset` … リセット");
+    await message.reply("……使い方が間違っている。\n`!profile` … 表示\n`!profile set 呼び名 [名前]` … 呼び名を記入\n`!profile set 備考 [内容]` … 備考を記入");
     return;
   }
 
   // ── !lore ─────────────────────────────────────────────────────
   if (content === "!lore" || content.startsWith("!lore ")) {
+    const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+    if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
     await handleLoreCommand(message);
     return;
   }
@@ -1536,6 +1525,8 @@ client.on("messageCreate", async (message) => {
     const args = content.slice("!memory".length).trim();
 
     if (args === "clear") {
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
       const ok = memoryManager.clearMemories(userId);
       await message.reply(ok ? "……記憶を消去した。" : "……記録がない。");
       return;
@@ -1576,30 +1567,18 @@ client.on("messageCreate", async (message) => {
       await message.reply("……退出する。観察記録は保存した。");
       return;
 
-    case "!kike":
-      if (!vcHandler.isConnected()) { await message.reply("……VCに入っていない。まず `!kanshi` を実行しろ。"); return; }
-      if (vcHandler.isListening()) { await message.reply("……もう聴いている。"); return; }
-      if (!listenCallback) { await message.reply("……`!kanshi` で参加し直せ。"); return; }
-      vcHandler.startListening(listenCallback);
-      await message.reply("……聴く。");
-      return;
-
-    case "!kikanai":
-      if (!vcHandler.isConnected()) { await message.reply("……VCに入っていない。"); return; }
-      if (!vcHandler.isListening()) { await message.reply("……もう聴いていない。"); return; }
-      vcHandler.stopListening();
-      await message.reply("……無視する。");
-      return;
-
     case "!reset":
       aiHandler.clearHistory(userId);
       await message.reply("気が変わった。記憶操作の薬だ、飲め。今すぐ");
       return;
 
-    case "!resetall":
+    case "!resetall": {
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
       aiHandler.clearAllHistory();
       await message.reply("……全員分だ。記憶操作の薬を投与した。逆らうな。");
       return;
+    }
 
     case "!status": {
       const now = Date.now();
@@ -1673,29 +1652,25 @@ client.on("messageCreate", async (message) => {
     case "!help":
       await message.reply(
         "【コマンド一覧】\n" +
-        "!reset                        … 自分の会話履歴をリセット\n" +
-        "!resetall                     … 全ユーザーの会話履歴をリセット\n" +
-        "!profile                      … 自分のプロフィールシートを表示\n" +
-        "!profile set [フィールド] [値] … プロフィールに記入（呼び名・症状・傾向・弱点・備考）\n" +
-        "!profile clear [フィールド]   … 特定フィールドを消去\n" +
-        "!profile reset                … 記入欄をすべてリセット\n" +
-        "!lore                         … 登録済みの知識一覧\n" +
-        "!lore [カテゴリ]              … カテゴリの内容を表示\n" +
-        "!lore set [カテゴリ] [内容]   … 知識を追加・更新（管理者のみ）\n" +
-        "!lore delete [カテゴリ]       … 知識を削除（管理者のみ）\n" +
-        "!nani                         … 雑談チャンネルの観察記録を表示\n" +
-        "!base                         … 自分の基本情報を表示\n" +
-        "!memory                       … 自分の記憶メモを表示\n" +
-        "!memory clear                 … 自分の記憶メモを消去\n" +
-        "!kanshi [VC名]                … VCに召喚（音声聴き取りON）\n" +
-        "!hakase [msg]                 … VCで音声再生\n" +
-        "!kike                         … 音声聴き取りON\n" +
-        "!kikanai                      … 音声聴き取りOFF\n" +
-        "!owari                        … VCから退出\n" +
-        "!status                       … 現在の機嫌・VC状態を確認\n" +
-        "!reload                       … messages.json を再読み込み\n" +
-        "!sendprofile                  … プロフィールメッセージを今すぐ送信（管理者のみ）\n" +
-        "!help                         … このヘルプを表示\n\n" +
+        "!reset                          … 自分の会話履歴をリセット\n" +
+        "!profile                        … 自分のプロフィールシートを表示\n" +
+        "!profile set 呼び名 [名前]      … 呼び名を記入\n" +
+        "!profile set 備考 [内容]        … 備考を記入\n" +
+        "!nani                           … 雑談チャンネルの観察記録を表示\n" +
+        "!base                           … 自分の基本情報を表示\n" +
+        "!memory                         … 自分の記憶メモを表示\n" +
+        "!kanshi [VC名]                  … VCに召喚\n" +
+        "!hakase [msg]                   … VCで音声再生\n" +
+        "!owari                          … VCから退出\n" +
+        "!status                         … 現在の機嫌・VC状態を確認\n" +
+        "!help                           … このヘルプを表示\n\n" +
+        "【管理者のみ】\n" +
+        "!resetall                       … 全ユーザーの会話履歴をリセット\n" +
+        "!lore / !lore set / !lore delete … 知識管理\n" +
+        "!memory clear                   … 記憶メモ消去\n" +
+        "!say [テキスト]                 … 任意チャンネルで発言\n" +
+        "!reload                         … messages.json 再読み込み\n" +
+        "!sendprofile                    … プロフィールメッセージを今すぐ送信\n\n" +
         "それ以外のメッセージはドットーレが回答します。"
       );
       return;
