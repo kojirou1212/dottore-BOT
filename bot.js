@@ -135,6 +135,7 @@ const loreChannelIds = new Set(
 );
 const vcNotifyChannelId = config.discord.vcNotifyChannelId || [...new Set(config.discord.targetChannelIds)][0];
 const zatsuChannelId = config.discord.zatsuChannelId || "";
+const jihouChannelIds = new Set(config.discord.jihouChannelIds ?? []);
 
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
@@ -944,7 +945,8 @@ function startScheduler() {
     if (!text) return;
 
     console.log(`[Scheduler] 定時メッセージ送信 hour=${hour} list=${listName}`);
-    for (const channelId of targetChannelIds) {
+    const jihouTargets = new Set([...targetChannelIds, ...jihouChannelIds]);
+    for (const channelId of jihouTargets) {
       try {
         const channel = await client.channels.fetch(channelId);
         if (!channel || !channel.isTextBased()) continue;
@@ -1599,13 +1601,6 @@ client.on("messageCreate", async (message) => {
       await message.reply("……全員分だ。記憶操作の薬を投与した。逆らうな。");
       return;
 
-    case "!okusuri": { const t = pick("okusuri"); if (t) await message.reply(t); return; }
-    case "!sleep":   { const t = pick("sleep");   if (t) await message.reply(t); return; }
-    case "!pain":    { const t = pick("pain");    if (t) await message.reply(t); return; }
-    case "!work":    { const t = pick("work");    if (t) await message.reply(t); return; }
-    case "!observe": { const t = pick("observe"); if (t) await message.reply(t); return; }
-    case "!reward":  { const t = pick("reward");  if (t) await message.reply(t); return; }
-
     case "!status": {
       const now = Date.now();
       const lines = ["……現状を報告する。\n"];
@@ -1680,12 +1675,6 @@ client.on("messageCreate", async (message) => {
         "【コマンド一覧】\n" +
         "!reset                        … 自分の会話履歴をリセット\n" +
         "!resetall                     … 全ユーザーの会話履歴をリセット\n" +
-        "!okusuri                      … 薬を投与してもらう\n" +
-        "!sleep                        … 就寝前、管理下で休む\n" +
-        "!pain                         … 痛み・不調を報告する\n" +
-        "!work                         … 作業・勉強を開始する\n" +
-        "!observe                      … 観察してほしいとき\n" +
-        "!reward                       … 成功・達成を報告する\n" +
         "!profile                      … 自分のプロフィールシートを表示\n" +
         "!profile set [フィールド] [値] … プロフィールに記入（呼び名・症状・傾向・弱点・備考）\n" +
         "!profile clear [フィールド]   … 特定フィールドを消去\n" +
