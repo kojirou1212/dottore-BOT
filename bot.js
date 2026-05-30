@@ -866,6 +866,170 @@ function startScheduler() {
   }, 60 * 1000);
 }
 
+// ─── プロフィール登録者へのランダムメッセージ ─────────────────────────────
+
+// 7種類のメッセージタイプ定義
+const PROFILE_MSG_TYPES = [
+  {
+    id: "observation",
+    label: "観察通知",
+    build: (p) => {
+      const name  = p.userFields.name || p.displayName;
+      const hobby = p.userFields.hobby ? `趣味は${p.userFields.hobby}` : "";
+      const obs   = p.botRecord.observation ? `評価：${p.botRecord.observation}` : "";
+      const info  = [hobby, obs].filter(Boolean).join("、");
+      return (
+        `ドットーレ（傲慢・冷静・知的、「お前」呼び）として、被検体「${name}」${info ? "（" + info + "）" : ""}を` +
+        `観察している博士が、ふと思い出したようにひとこと呟く。1文のみ。地の文・説明不要。`
+      );
+    },
+  },
+  {
+    id: "question",
+    label: "突発質問",
+    build: (p) => {
+      const name    = p.userFields.name || p.displayName;
+      const hobby   = p.userFields.hobby ? `趣味：${p.userFields.hobby}` : "";
+      const tendency = p.userFields.tendency ? `傾向：${p.userFields.tendency}` : "";
+      const info    = [hobby, tendency].filter(Boolean).join("、");
+      return (
+        `ドットーレ（傲慢・知的、「お前」呼び）として、被検体「${name}」${info ? "（" + info + "）" : ""}に` +
+        `前置きなく唐突に質問をひとこと投げかける。1文のみ。地の文・説明不要。`
+      );
+    },
+  },
+  {
+    id: "experiment",
+    label: "実験招待",
+    build: (p) => {
+      const name = p.userFields.name || p.displayName;
+      return (
+        `ドットーレ（傲慢・研究者気質、「お前」呼び）として、被検体「${name}」に` +
+        `「何か実験したいことがある」というニュアンスでさらっとひとこと言う。具体的な内容には触れない。1文のみ。地の文不要。`
+      );
+    },
+  },
+  {
+    id: "checkin",
+    label: "生存確認",
+    build: (p) => {
+      const name = p.userFields.name || p.displayName;
+      return (
+        `ドットーレ（冷静・感情を表に出さない、「お前」呼び）として、被検体「${name}」に` +
+        `心配を悟らせずに生存確認をするひとこと。淡々と、さらっと。1文のみ。地の文不要。`
+      );
+    },
+  },
+  {
+    id: "provocation",
+    label: "知的挑発",
+    build: (p) => {
+      const name     = p.userFields.name || p.displayName;
+      const tendency = p.userFields.tendency ? `傾向：${p.userFields.tendency}` : "";
+      const weakness = p.userFields.weakness ? `弱点：${p.userFields.weakness}` : "";
+      const info     = [tendency, weakness].filter(Boolean).join("、");
+      return (
+        `ドットーレ（皮肉的・知的、「お前」呼び）として、被検体「${name}」${info ? "（" + info + "）" : ""}の` +
+        `矛盾や弱点を軽くつついくような皮肉をひとこと言う。攻撃的にならず観察者として。1文のみ。地の文不要。`
+      );
+    },
+  },
+  {
+    id: "musing",
+    label: "思索の断片",
+    build: (p) => {
+      const name  = p.userFields.name || p.displayName;
+      const hobby = p.userFields.hobby ? `趣味：${p.userFields.hobby}` : "";
+      const obs   = p.botRecord.observation ? `評価：${p.botRecord.observation}` : "";
+      const info  = [hobby, obs].filter(Boolean).join("、");
+      return (
+        `ドットーレ（知的・内省的）として、被検体「${name}」${info ? "（" + info + "）" : ""}に関連するような` +
+        `研究の断片を独り言のようにひとこと呟く。被検体への言及は匂わせる程度。1文のみ。地の文不要。`
+      );
+    },
+  },
+  {
+    id: "nameCall",
+    label: "協力感謝",
+    build: (p) => {
+      const count = p.botRecord.messageCount;
+      const obs   = p.botRecord.observation ? `評価：${p.botRecord.observation}` : "";
+      return (
+        `ドットーレ（冷静・傲慢、感情を表に出さない研究者）として、被検体（観測回数${count}回${obs ? "、" + obs : ""}）に` +
+        `「よろしく」や「協力に感謝する」にあたる一言を、感情を抑えた乾いた言葉でひとこと言う。` +
+        `「被検体」と呼ぶこと。あくまで研究者として淡々と。1文のみ。地の文不要。`
+      );
+    },
+  },
+];
+
+async function sendRandomProfileMessages() {
+  const notifyChannelId = [...targetChannelIds][0];
+  if (!notifyChannelId) return;
+
+  // 呼び名が登録されているユーザーを抽出
+  const registered = Object.entries(profileManager.profiles)
+    .filter(([, p]) => p.userFields?.name)
+    .map(([uid]) => uid);
+
+  if (registered.length === 0) {
+    console.log("[Bot] プロフィール登録者なし、スキップ");
+    return;
+  }
+
+  // ランダムに1〜2人を選択
+  const shuffled = [...registered].sort(() => Math.random() - 0.5);
+  const targets = shuffled.slice(0, Math.min(2, shuffled.length));
+
+  const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
+  if (!channel?.isTextBased()) return;
+
+  for (const userId of targets) {
+    const profile = profileManager.profiles[userId];
+    // 7種類からランダム選択（nameCallは確率低め）
+    const pool = [
+      ...PROFILE_MSG_TYPES.filter(t => t.id !== "nameCall"),
+      ...PROFILE_MSG_TYPES.filter(t => t.id !== "nameCall"),
+      PROFILE_MSG_TYPES.find(t => t.id === "nameCall"),
+    ];
+    const type = pool[Math.floor(Math.random() * pool.length)];
+
+    try {
+      const prompt = type.build(profile);
+      const text = await aiHandler.generateSimple(prompt, 80);
+      if (!text || text.length < 5) continue;
+
+      await channel.send(`<@${userId}>\n${text}`);
+      console.log(`[Bot] プロフィールメッセージ送信 [${userId}] type=${type.id}`);
+      await new Promise(r => setTimeout(r, 4000));
+    } catch (err) {
+      console.error(`[Bot] プロフィールメッセージエラー [${userId}]:`, err.message);
+    }
+  }
+}
+
+// JST 11:00〜21:00 の間でランダムな時刻に毎日1回送信
+let profileMsgTimer = null;
+function scheduleProfileMessages() {
+  if (profileMsgTimer) { clearTimeout(profileMsgTimer); profileMsgTimer = null; }
+
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const targetHour = Math.floor(Math.random() * 11) + 11; // 11〜21時
+  const targetMin  = Math.floor(Math.random() * 60);
+
+  let delayMs = ((targetHour - now.getHours()) * 60 + (targetMin - now.getMinutes())) * 60000;
+  if (delayMs <= 60000) delayMs += 24 * 60 * 60 * 1000; // 1分以内なら翌日に
+
+  const hh = String(targetHour).padStart(2, "0");
+  const mm = String(targetMin).padStart(2, "0");
+  console.log(`[Bot] 次回プロフィールメッセージ: ${hh}:${mm} JST (${Math.round(delayMs / 60000)}分後)`);
+
+  profileMsgTimer = setTimeout(async () => {
+    await sendRandomProfileMessages();
+    scheduleProfileMessages();
+  }, delayMs);
+}
+
 // ─── Ready ────────────────────────────────────────────────────────────────
 client.once("clientReady", async () => {
   console.log(`[Bot] ログイン完了: ${client.user.tag}`);
@@ -873,6 +1037,7 @@ client.once("clientReady", async () => {
   console.log(`[Bot] 使用モデル: ${config.grok.model}`);
   resetDailyMood();
   startScheduler();
+  scheduleProfileMessages();
   await autoRejoinVC();
 });
 
@@ -1402,6 +1567,14 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    case "!sendprofile": {
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+      await message.reply("……送信する。");
+      sendRandomProfileMessages().catch(err => console.error("[Bot] !sendprofile エラー:", err.message));
+      return;
+    }
+
     case "!help":
       await message.reply(
         "【コマンド一覧】\n" +
@@ -1431,6 +1604,7 @@ client.on("messageCreate", async (message) => {
         "!owari                        … VCから退出\n" +
         "!status                       … 現在の機嫌・VC状態を確認\n" +
         "!reload                       … messages.json を再読み込み\n" +
+        "!sendprofile                  … プロフィールメッセージを今すぐ送信（管理者のみ）\n" +
         "!help                         … このヘルプを表示\n\n" +
         "それ以外のメッセージはドットーレが回答します。"
       );
