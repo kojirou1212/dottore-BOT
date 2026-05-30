@@ -301,13 +301,13 @@ async function handleProfilePost(message) {
 
     const botMember = await guild.members.fetchMe();
     const botHighest = botMember.roles.highest;
-    const targetRole = guild.roles.cache.get("1510283895755505856")
-      ?? await guild.roles.fetch("1510283895755505856");
+    const targetRole = guild.roles.cache.get("1510285079031578634")
+      ?? await guild.roles.fetch("1510285079031578634");
 
     console.log(`[Bot] ロール付与デバッグ: bot最高ロール="${botHighest?.name}"(pos=${botHighest?.position}) / 対象ロール="${targetRole?.name}"(pos=${targetRole?.position}) / bot権限=${botMember.permissions.has("ManageRoles") ? "ManageRoles○" : "ManageRoles×"}`);
 
     const member = message.member ?? await guild.members.fetch(userId);
-    await member.roles.add("1510283895755505856");
+    await member.roles.add("1510285079031578634");
     console.log(`[Bot] 被検体ロール付与 [${userTag}]`);
   } catch (err) {
     console.error(`[Bot] ロール付与失敗 [${userTag}]:`, err.message);
