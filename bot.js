@@ -1231,6 +1231,17 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
+  // !say はどのチャンネルからでも管理者が使用可能
+  if (message.content.trimStart().startsWith("!say")) {
+    const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+    if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+    const sayText = message.content.trim().slice("!say".length).trim();
+    if (!sayText) { await message.reply("送信するテキストを入力しろ。"); return; }
+    try { await message.delete(); } catch (_) {}
+    await message.channel.send(sayText);
+    return;
+  }
+
   const isTarget = targetChannelIds.has(message.channelId);
   const isProfileCh = profileChannelIds.size > 0
     && profileChannelIds.has(message.channelId)
@@ -1484,16 +1495,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // ── !say（前処理：前方一致コマンド）──────────────────────────────
-  if (content.startsWith("!say ") || content === "!say") {
-    const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-    if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
-    const sayText = content.slice("!say".length).trim();
-    if (!sayText) { await message.reply("送信するテキストを入力しろ。"); return; }
-    try { await message.delete(); } catch (_) {}
-    await message.channel.send(sayText);
-    return;
-  }
 
   // ── コマンド ─────────────────────────────────────────────────
   switch (content) {
