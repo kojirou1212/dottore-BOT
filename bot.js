@@ -296,7 +296,17 @@ async function handleProfilePost(message) {
 
   // 被検体ロール付与
   try {
-    const member = message.member ?? await message.guild.members.fetch(userId);
+    const guild = message.guild;
+    if (!guild) { console.error("[Bot] ロール付与失敗: guild が null"); return; }
+
+    const botMember = await guild.members.fetchMe();
+    const botHighest = botMember.roles.highest;
+    const targetRole = guild.roles.cache.get("1510283895755505856")
+      ?? await guild.roles.fetch("1510283895755505856");
+
+    console.log(`[Bot] ロール付与デバッグ: bot最高ロール="${botHighest?.name}"(pos=${botHighest?.position}) / 対象ロール="${targetRole?.name}"(pos=${targetRole?.position}) / bot権限=${botMember.permissions.has("ManageRoles") ? "ManageRoles○" : "ManageRoles×"}`);
+
+    const member = message.member ?? await guild.members.fetch(userId);
     await member.roles.add("1510283895755505856");
     console.log(`[Bot] 被検体ロール付与 [${userTag}]`);
   } catch (err) {
