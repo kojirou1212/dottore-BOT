@@ -134,6 +134,7 @@ const loreChannelIds = new Set(
     .split(",").map(s => s.trim()).filter(Boolean)
 );
 const vcNotifyChannelId = config.discord.vcNotifyChannelId || [...new Set(config.discord.targetChannelIds)][0];
+const zatsuChannelId = config.discord.zatsuChannelId || "";
 
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
@@ -153,6 +154,9 @@ function trackChannelTopic(message) {
     timestamp: Date.now(),
   });
   while (topics.length > TOPIC_MAX_PER_CH) topics.shift();
+  if (zatsuChannelId && channelId === zatsuChannelId) {
+    console.log(`[雑談記録] 追加 ${message.author.username}: ${content.slice(0, 60)}`);
+  }
 }
 
 function getRecentTopicsHint() {
@@ -1486,6 +1490,34 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
+  // ── !nani ─────────────────────────────────────────────────────
+  if (content === "!nani") {
+    const topics = zatsuChannelId ? channelTopics.get(zatsuChannelId) : null;
+    if (!topics || topics.length === 0) {
+      await message.reply("……まだ何も記録していない。雑談チャンネルに動きがない。");
+      return;
+    }
+    const now = Date.now();
+    const recent = topics.filter(t => now - t.timestamp < TOPIC_MAX_AGE_MS);
+    if (recent.length === 0) {
+      await message.reply("……記録はあるが、すべて古いデータだ。最近の動きはない。");
+      return;
+    }
+    const lines = recent.slice(-10).map(t => {
+      const min = Math.round((now - t.timestamp) / 60000);
+      const ago = min < 60 ? `${min}分前` : `${Math.round(min / 60)}時間前`;
+      return `・${t.username}（${ago}）：「${t.content.slice(0, 80)}」`;
+    }).join("\n");
+    const prompt =
+      `以下は雑談チャンネルで密かに観察・記録した被検体たちの発言ログだ。\n\n${lines}\n\n` +
+      `ドットーレ（研究者視点・傲慢・冷静）として、この記録を聞かれたので端的に報告せよ。` +
+      `観察者の視点で淡々と。評価・分析を交えてよいが3〜4文以内。地の文不要。`;
+    if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
+    const reply = await aiHandler.generateSimple(prompt, 250);
+    await message.reply(reply || "……記録はある。だが、今は話す気分ではない。");
+    return;
+  }
+
   // ── !base ─────────────────────────────────────────────────────
   if (content === "!base") {
     const entry = knowledgeBase.getUserBase(userId);
@@ -1662,6 +1694,7 @@ client.on("messageCreate", async (message) => {
         "!lore [カテゴリ]              … カテゴリの内容を表示\n" +
         "!lore set [カテゴリ] [内容]   … 知識を追加・更新（管理者のみ）\n" +
         "!lore delete [カテゴリ]       … 知識を削除（管理者のみ）\n" +
+        "!nani                         … 雑談チャンネルの観察記録を表示\n" +
         "!base                         … 自分の基本情報を表示\n" +
         "!memory                       … 自分の記憶メモを表示\n" +
         "!memory clear                 … 自分の記憶メモを消去\n" +
