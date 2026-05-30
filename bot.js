@@ -1682,11 +1682,6 @@ client.on("messageCreate", async (message) => {
   // ── AI 応答 ───────────────────────────────────────────────────
   console.log(`[Bot] メッセージ受信 [${userTag}]: ${content.slice(0, 80)}`);
 
-  // TTS読み上げBOT経由VC反応：テキストを直接VC反応パイプラインに転送（Gemini STTバイパス）
-  if ((config.discord.ttsBotIds ?? []).length > 0 && vcHandler.isConnected() && listenCallback) {
-    listenCallback(userId, content, { fromText: true }).catch(() => {});
-  }
-
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const survival = isSurvivalMessage(content);
@@ -1734,12 +1729,6 @@ client.on("messageCreate", async (message) => {
       extractAndStoreMemory(userId, content, reply).catch(() => {});
     }
 
-    // VCに接続中なら音声も再生（AI返答テキストでマッチング・非同期）
-    if (vcHandler.isConnected()) {
-      vcHandler.respondToMessage(reply).catch((err) =>
-        console.error("[Bot] テキスト→VC音声エラー:", err.message)
-      );
-    }
   } catch (error) {
     console.error(`[Bot] エラー [${userTag}]:`, error.message);
     try {
