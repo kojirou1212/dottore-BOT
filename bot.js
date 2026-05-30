@@ -274,8 +274,16 @@ async function handleProfilePost(message) {
 
   console.log(`[Bot] プロフィール登録 [${userTag}]: ${filled}フィールド解析`);
 
+  try { await message.react("🔬"); } catch (_) {}
+
   try {
-    await message.react("🔬");
+    const name = parsed.name || userTag;
+    const prompt =
+      `ドットーレ（傲慢・冷静な研究者、「被検体」呼び）として、被検体「${name}」が` +
+      `登録データを提出してきたことを確認するひとこと。「データを受け取った」「記録した」相当の意味で。` +
+      `1文のみ。地の文不要。`;
+    const reply = await aiHandler.generateSimple(prompt, 80);
+    if (reply) await message.reply(reply);
   } catch (_) {}
 }
 
