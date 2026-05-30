@@ -125,6 +125,10 @@ const profileManager = new ProfileManager();
 const knowledgeBase = new KnowledgeBase();
 const memoryManager = new MemoryManager();
 const targetChannelIds = new Set(config.discord.targetChannelIds);
+const profileChannelIds = new Set(
+  (config.discord.profileChannelId || "")
+    .split(",").map(s => s.trim()).filter(Boolean)
+);
 
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
@@ -276,14 +280,18 @@ async function handleProfilePost(message) {
 
   try { await message.react("🔬"); } catch (_) {}
 
+  const PROFILE_REG_REPLIES = [
+    "……データを受け取った。記録する。",
+    "登録を確認した。被検体として管理下に置く。",
+    "……ふん。一応、記録しておこう。",
+    "被検体よ、情報を受領した。引き続き観察する。",
+    "……記録完了。これで管理対象だ。",
+    "データ、確認した。期待はしていないが、参考にしよう。",
+    "……登録を認める。以後、観察を続ける。",
+  ];
   try {
-    const name = parsed.name || userTag;
-    const prompt =
-      `ドットーレ（傲慢・冷静な研究者、「被検体」呼び）として、被検体「${name}」が` +
-      `登録データを提出してきたことを確認するひとこと。「データを受け取った」「記録した」相当の意味で。` +
-      `1文のみ。地の文不要。`;
-    const reply = await aiHandler.generateSimple(prompt, 80);
-    if (reply) await message.reply(reply);
+    const reply = PROFILE_REG_REPLIES[Math.floor(Math.random() * PROFILE_REG_REPLIES.length)];
+    await message.reply(reply);
   } catch (_) {}
 }
 
@@ -1205,8 +1213,8 @@ client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
   const isTarget = targetChannelIds.has(message.channelId);
-  const isProfileCh = config.discord.profileChannelId
-    && message.channelId === config.discord.profileChannelId
+  const isProfileCh = profileChannelIds.size > 0
+    && profileChannelIds.has(message.channelId)
     && !isTarget;
 
   // プロフィールチャンネル：ユーザー基本情報を保管
