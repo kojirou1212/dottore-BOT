@@ -1602,6 +1602,18 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    case "!say": {
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+      const sayText = content.slice("!say".length).trim();
+      if (!sayText) { await message.reply("送信するテキストを入力しろ。"); return; }
+      try {
+        await message.delete();
+      } catch (_) {}
+      await message.channel.send(sayText);
+      return;
+    }
+
     case "!sendprofile": {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
       if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
