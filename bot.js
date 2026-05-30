@@ -225,15 +225,54 @@ async function extractAndStoreMemory(userId, userMessage, aiReply) {
 }
 
 // ─── プロフィールチャンネル投稿処理 ─────────────────────────────────────────
+// プロフィールテンプレートのフィールドを解析してprofileManagerに反映
+function parseProfileTemplate(content) {
+  const result = {};
+  for (const line of content.split(/\r?\n/)) {
+    const m = line.match(/^([^：:]+)[：:]\s*(.+)/);
+    if (!m) continue;
+    const key = m[1].trim();
+    const val = m[2].trim();
+    if (!val) continue;
+    if (/^名前/.test(key))          result.name   = val;
+    else if (/^年齢/.test(key))     result.age    = val;
+    else if (/^性別/.test(key))     result.gender = val;
+    else if (/^趣味/.test(key))     result.hobby  = val;
+    else if (/^一言/.test(key))     result.memo   = val;
+    else if (/^症状/.test(key))     result.symptom   = val;
+    else if (/^傾向/.test(key))     result.tendency  = val;
+    else if (/^弱点/.test(key))     result.weakness  = val;
+    else if (/^備考/.test(key))     result.memo      = val;
+  }
+  return result;
+}
+
 async function handleProfilePost(message) {
   const userId = message.author.id;
   const userTag = message.author.tag;
   const content = message.content.trim();
   if (!content) return;
 
+  // 生テキストをknowledge-baseに保存（永久）
   knowledgeBase.setUserBase(userId, userTag, content);
   profileManager.onMessage(userId, userTag);
-  console.log(`[Bot] ユーザーベース登録 [${userTag}]: ${content.slice(0, 60)}`);
+
+  // テンプレート形式を解析して!profileフィールドに自動マッピング
+  const parsed = parseProfileTemplate(content);
+  const fieldMap = {
+    name: "呼び名", age: "年齢", gender: "性別",
+    hobby: "趣味", symptom: "症状", tendency: "傾向",
+    weakness: "弱点", memo: "備考",
+  };
+  let filled = 0;
+  for (const [key, jpField] of Object.entries(fieldMap)) {
+    if (parsed[key]) {
+      profileManager.setField(userId, jpField, parsed[key], userTag);
+      filled++;
+    }
+  }
+
+  console.log(`[Bot] プロフィール登録 [${userTag}]: ${filled}フィールド解析`);
 
   try {
     await message.react("🔬");

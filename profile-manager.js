@@ -7,6 +7,9 @@ const PROFILES_PATH = path.join(__dirname, "user-profiles.json");
 // 日本語フィールド名 → 内部キー
 const FIELD_MAP = {
   "呼び名": "name",
+  "年齢":   "age",
+  "性別":   "gender",
+  "趣味":   "hobby",
   "症状":   "symptom",
   "傾向":   "tendency",
   "弱点":   "weakness",
@@ -15,6 +18,9 @@ const FIELD_MAP = {
 
 const FIELD_LABELS = {
   name:      "呼び名",
+  age:       "年齢",
+  gender:    "性別／代名詞",
+  hobby:     "趣味",
   symptom:   "症状・現在の状態",
   tendency:  "傾向・特徴",
   weakness:  "弱点・苦手",
@@ -22,7 +28,8 @@ const FIELD_LABELS = {
 };
 
 const EMPTY_USER_FIELDS = () => ({
-  name: null, symptom: null, tendency: null, weakness: null, memo: null,
+  name: null, age: null, gender: null, hobby: null,
+  symptom: null, tendency: null, weakness: null, memo: null,
 });
 
 class ProfileManager {
@@ -35,13 +42,9 @@ class ProfileManager {
     try {
       if (fs.existsSync(PROFILES_PATH)) {
         this.profiles = JSON.parse(fs.readFileSync(PROFILES_PATH, "utf-8"));
-        // 旧フォーマット（age/statusキー）を新フォーマットへ移行
+        // 旧フォーマット移行・新キー補完
         for (const p of Object.values(this.profiles)) {
           if (!p.userFields) { p.userFields = EMPTY_USER_FIELDS(); continue; }
-          if ("age" in p.userFields) {
-            if (!p.userFields.symptom && p.userFields.age) p.userFields.symptom = `年齢: ${p.userFields.age}`;
-            delete p.userFields.age;
-          }
           if ("status" in p.userFields) {
             if (!p.userFields.symptom && p.userFields.status) p.userFields.symptom = p.userFields.status;
             delete p.userFields.status;
@@ -170,12 +173,16 @@ class ProfileManager {
 
     lines.push("\n── 記入コマンド ──");
     lines.push("`!profile set 呼び名 [名前]`");
+    lines.push("`!profile set 年齢 [未成年 or 成人済み]`");
+    lines.push("`!profile set 性別 [性別・代名詞]`");
+    lines.push("`!profile set 趣味 [趣味・好きなこと]`");
     lines.push("`!profile set 症状 [現在の不調・状態]`");
     lines.push("`!profile set 傾向 [性格・行動パターン]`");
     lines.push("`!profile set 弱点 [苦手・気にしていること]`");
     lines.push("`!profile set 備考 [自由メモ]`");
     lines.push("`!profile clear [フィールド名]` … 特定フィールドを消去");
     lines.push("`!profile reset` … 記入欄をすべてリセット");
+    lines.push("\n※プロフィールチャンネルに投稿すると自動で登録されます。");
 
     return lines.join("\n");
   }
@@ -186,6 +193,9 @@ class ProfileManager {
     if (!p) return "";
     const parts = [];
     if (p.userFields.name)     parts.push(`呼び名「${p.userFields.name}」`);
+    if (p.userFields.age)      parts.push(`年齢「${p.userFields.age}」`);
+    if (p.userFields.gender)   parts.push(`性別「${p.userFields.gender}」`);
+    if (p.userFields.hobby)    parts.push(`趣味「${p.userFields.hobby}」`);
     if (p.userFields.symptom)  parts.push(`申告症状・状態「${p.userFields.symptom}」`);
     if (p.userFields.tendency) parts.push(`行動傾向「${p.userFields.tendency}」`);
     if (p.userFields.memo)     parts.push(`備考「${p.userFields.memo}」`);
@@ -195,6 +205,11 @@ class ProfileManager {
     if (p.botRecord.survivalCount > 0) {
       parts.push(`ドットーレの生存を心配する発言${p.botRecord.survivalCount}回観測済み`);
     }
+
+    // 年齢が未成年の場合は特別注記
+    const ageNote = p.userFields.age && /未成年/.test(p.userFields.age)
+      ? "この被検体は未成年である。不適切な表現・性的示唆・過度な暴力描写は一切行わないこと。"
+      : "";
 
     // 弱点は別枠で明示（AI配慮指示として強調）
     const weaknessHint = p.userFields.weakness
@@ -206,10 +221,10 @@ class ProfileManager {
       ? `ドットーレによる人物評価：「${p.botRecord.observation}」`
       : "";
 
-    if (parts.length === 0 && !weaknessHint && !observationHint) return "";
+    if (parts.length === 0 && !ageNote && !weaknessHint && !observationHint) return "";
 
     const baseHint = parts.length > 0 ? `【この被検体の記録】${parts.join("、")}。` : "";
-    return [baseHint, observationHint, weaknessHint].filter(Boolean).join("\n");
+    return [baseHint, observationHint, ageNote, weaknessHint].filter(Boolean).join("\n");
   }
 }
 
