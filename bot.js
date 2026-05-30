@@ -7,6 +7,8 @@ const path = require("path");
 const AIHandler = require("./ai-handler");
 const { VCHandler } = require("./vc-handler");
 const ProfileManager = require("./profile-manager");
+const KnowledgeBase = require("./knowledge-base");
+const MemoryManager = require("./memory-manager");
 
 // ─── 設定の読み込み（環境変数優先、なければ config.json）─────────────────
 let config;
@@ -120,7 +122,45 @@ const client = new Client({
 const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
 const profileManager = new ProfileManager();
+const knowledgeBase = new KnowledgeBase();
+const memoryManager = new MemoryManager();
 const targetChannelIds = new Set(config.discord.targetChannelIds);
+
+// ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
+const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
+const TOPIC_MAX_PER_CH = 15;
+const TOPIC_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function trackChannelTopic(message) {
+  const content = message.content.trim();
+  if (!content || content.length < 5) return;
+  const channelId = message.channelId;
+  if (!channelTopics.has(channelId)) channelTopics.set(channelId, []);
+  const topics = channelTopics.get(channelId);
+  topics.push({
+    username: message.author.username,
+    content: content.slice(0, 150),
+    channelName: message.channel?.name ?? channelId,
+    timestamp: Date.now(),
+  });
+  while (topics.length > TOPIC_MAX_PER_CH) topics.shift();
+}
+
+function getRecentTopicsHint() {
+  const now = Date.now();
+  const lines = [];
+  for (const [, topics] of channelTopics) {
+    const recent = topics.filter(t => now - t.timestamp < TOPIC_MAX_AGE_MS);
+    if (recent.length === 0) continue;
+    const chName = recent[0].channelName;
+    const snippet = recent.slice(-3)
+      .map(t => `「${t.content.slice(0, 80)}」(${t.username})`)
+      .join("、");
+    lines.push(`#${chName}: ${snippet}`);
+  }
+  if (lines.length === 0) return "";
+  return `【他チャンネルの最近の動向（参考情報）】\n${lines.join("\n")}`;
+}
 
 // ─── 観察メモ更新（5会話ごと or 重要イベント時、クールダウン付き）────────────
 const observationCooldowns = new Map(); // userId → lastUpdateTimestamp
@@ -153,6 +193,51 @@ async function updateObservation(userId, userMessage, aiReply) {
     console.error("[Bot] 観察記録更新エラー:", err.message);
     observationCooldowns.delete(userId); // 失敗時はクールダウンリセット
   }
+}
+
+// ─── ユーザー記憶抽出（週次リフレッシュ対象）────────────────────────────────
+const memoryCooldowns = new Map(); // userId → lastExtractTimestamp
+
+async function extractAndStoreMemory(userId, userMessage, aiReply) {
+  const COOLDOWN_MS = 5 * 60 * 1000;
+  const now = Date.now();
+  if ((memoryCooldowns.get(userId) ?? 0) + COOLDOWN_MS > now) return;
+  memoryCooldowns.set(userId, now);
+
+  const existing = memoryManager.getMemories(userId).slice(-5).map(e => e.text).join("; ");
+  const prompt =
+    `以下の発言から、この人物について記憶すべき具体的な事実・情報を1点だけ抽出せよ。\n` +
+    `既存の記憶：${existing || "なし"}\n` +
+    `発言：「${userMessage.slice(0, 300)}」\n\n` +
+    `出力形式：短い1文のみ（例：「猫を飼っている」「今日バイトがある」「試験勉強中」）。` +
+    `新しく記憶すべき事実がない場合・既存記憶と重複する場合は「なし」とだけ出力すること。`;
+
+  try {
+    const result = await aiHandler.generateSimple(prompt, 60);
+    if (result && result.trim() !== "なし" && result.length < 100) {
+      memoryManager.addMemory(userId, result.trim());
+      console.log(`[Bot] 記憶追加 [${userId}]: ${result.trim()}`);
+    }
+  } catch (err) {
+    console.error("[Bot] 記憶抽出エラー:", err.message);
+    memoryCooldowns.delete(userId);
+  }
+}
+
+// ─── プロフィールチャンネル投稿処理 ─────────────────────────────────────────
+async function handleProfilePost(message) {
+  const userId = message.author.id;
+  const userTag = message.author.tag;
+  const content = message.content.trim();
+  if (!content) return;
+
+  knowledgeBase.setUserBase(userId, userTag, content);
+  profileManager.onMessage(userId, userTag);
+  console.log(`[Bot] ユーザーベース登録 [${userTag}]: ${content.slice(0, 60)}`);
+
+  try {
+    await message.react("🔬");
+  } catch (_) {}
 }
 
 // 一人になったときの退出タイマー
@@ -906,7 +991,23 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 // ─── メッセージ受信 ────────────────────────────────────────────────────────
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-  if (!targetChannelIds.has(message.channelId)) return;
+
+  const isTarget = targetChannelIds.has(message.channelId);
+  const isProfileCh = config.discord.profileChannelId
+    && message.channelId === config.discord.profileChannelId
+    && !isTarget;
+
+  // プロフィールチャンネル：ユーザー基本情報を保管
+  if (isProfileCh) {
+    await handleProfilePost(message);
+    return;
+  }
+
+  // 対象外チャンネル：話題をトラッキングのみ
+  if (!isTarget) {
+    trackChannelTopic(message);
+    return;
+  }
 
   const userId = message.author.id;
   const userTag = message.author.tag;
@@ -1066,6 +1167,84 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
+  // ── !lore ─────────────────────────────────────────────────────
+  if (content === "!lore" || content.startsWith("!lore ")) {
+    const args = content.slice("!lore".length).trim();
+    const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+
+    if (!args) {
+      const cats = knowledgeBase.listLoreCategories();
+      if (cats.length === 0) {
+        await message.reply("……まだ何も登録されていない。");
+      } else {
+        await message.reply(`【登録済み知識】\n${cats.map(c => `・${c}`).join("\n")}`);
+      }
+      return;
+    }
+
+    if (args.startsWith("set ") && isAdmin) {
+      const rest = args.slice("set ".length).trim();
+      const spaceIdx = rest.search(/\s/);
+      if (spaceIdx === -1) { await message.reply("……カテゴリと内容を両方指定しろ。"); return; }
+      const cat = rest.slice(0, spaceIdx).trim();
+      const content2 = rest.slice(spaceIdx + 1).trim();
+      knowledgeBase.setLore(cat, content2);
+      await message.reply(`……「${cat}」を記録した。`);
+      return;
+    }
+
+    if (args.startsWith("delete ") && isAdmin) {
+      const cat = args.slice("delete ".length).trim();
+      const ok = knowledgeBase.deleteLore(cat);
+      await message.reply(ok ? `……「${cat}」を削除した。` : `……「${cat}」は存在しない。`);
+      return;
+    }
+
+    if (args.startsWith("set ") || args.startsWith("delete ")) {
+      await message.reply("……管理者権限が必要だ。");
+      return;
+    }
+
+    // カテゴリ指定
+    const entry = knowledgeBase.getLore(args);
+    if (!entry) {
+      await message.reply(`……「${args}」というカテゴリは存在しない。`);
+    } else {
+      await message.reply(`【${args}】\n${entry.content}\n（更新: ${entry.updatedAt}）`);
+    }
+    return;
+  }
+
+  // ── !base ─────────────────────────────────────────────────────
+  if (content === "!base") {
+    const entry = knowledgeBase.getUserBase(userId);
+    if (!entry) {
+      await message.reply(`……${config.discord.profileChannelId ? "プロフィールチャンネルに投稿すれば記録する。" : "基本情報が登録されていない。"}`);
+    } else {
+      await message.reply(`……被検体「${entry.displayName}」の基本情報。\n（登録: ${entry.updatedAt}）\n\n${entry.postedProfile}`);
+    }
+    return;
+  }
+
+  // ── !memory ──────────────────────────────────────────────────
+  if (content === "!memory" || content.startsWith("!memory ")) {
+    const args = content.slice("!memory".length).trim();
+
+    if (args === "clear") {
+      const ok = memoryManager.clearMemories(userId);
+      await message.reply(ok ? "……記憶を消去した。" : "……記録がない。");
+      return;
+    }
+
+    const display = memoryManager.formatForDisplay(userId);
+    if (!display) {
+      await message.reply("……まだ何も記録されていない。");
+    } else {
+      await message.reply(`……お前に関する記憶。\n\n${display}`);
+    }
+    return;
+  }
+
   // ── コマンド ─────────────────────────────────────────────────
   switch (content) {
     case "!owari":
@@ -1199,6 +1378,13 @@ client.on("messageCreate", async (message) => {
         "!profile set [フィールド] [値] … プロフィールに記入（呼び名・症状・傾向・弱点・備考）\n" +
         "!profile clear [フィールド]   … 特定フィールドを消去\n" +
         "!profile reset                … 記入欄をすべてリセット\n" +
+        "!lore                         … 登録済みの知識一覧\n" +
+        "!lore [カテゴリ]              … カテゴリの内容を表示\n" +
+        "!lore set [カテゴリ] [内容]   … 知識を追加・更新（管理者のみ）\n" +
+        "!lore delete [カテゴリ]       … 知識を削除（管理者のみ）\n" +
+        "!base                         … 自分の基本情報を表示\n" +
+        "!memory                       … 自分の記憶メモを表示\n" +
+        "!memory clear                 … 自分の記憶メモを消去\n" +
         "!kanshi [VC名]                … VCに召喚（音声聴き取りON）\n" +
         "!hakase [msg]                 … VCで音声再生\n" +
         "!kike                         … 音声聴き取りON\n" +
@@ -1235,7 +1421,11 @@ client.on("messageCreate", async (message) => {
       ? "対象の状態が観察適正範囲を外れつつある。今回の返答では、不安定・消耗・混乱といった状態変化を研究者として認識・記録する立場から応答すること。「心配」「かわいそう」「大丈夫」などの感情語は一切使わない。代わりに「誤差が大きくなっている」「状態が最適範囲を外れた」「今は余計な負荷をかけるな」「私の管理下で安定させろ」など、観察・管理・最適化の言語で対応すること。突き放さず、ただ確実にそこにいる研究者として「お前の状態は把握している」という事実を静かに示すこと。完全に安心させず、ただ管理下にいることを確認させる余白を残すこと。"
       : null;
 
-    const systemHint = [profileHint, sentimentHint].filter(Boolean).join("\n\n") || undefined;
+    const loreHint = knowledgeBase.getLoreContextHint();
+    const userBaseHint = knowledgeBase.getUserBaseHint(userId);
+    const memoryHint = memoryManager.formatForContext(userId);
+    const topicsHint = getRecentTopicsHint();
+    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, sentimentHint, topicsHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, content, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
@@ -1256,6 +1446,11 @@ client.on("messageCreate", async (message) => {
     const msgCount = profileManager.profiles[userId]?.botRecord?.messageCount ?? 0;
     if (negative || survival || msgCount % 5 === 0) {
       updateObservation(userId, content, reply).catch(() => {});
+    }
+
+    // 記憶抽出（3会話ごと）
+    if (msgCount % 3 === 0) {
+      extractAndStoreMemory(userId, content, reply).catch(() => {});
     }
 
     // VCに接続中なら音声も再生（AI返答テキストでマッチング・非同期）
