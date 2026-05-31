@@ -1050,22 +1050,30 @@ async function sendRandomProfileMessages() {
   const notifyChannelId = vcNotifyChannelId;
   if (!notifyChannelId) return;
 
-  // 呼び名が登録されているユーザーを抽出
-  const registered = Object.entries(profileManager.profiles)
+  const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
+  if (!channel?.isTextBased()) return;
+  const guild = channel.guild;
+
+  // 呼び名が登録されており、このギルドのメンバーであるユーザーのみ抽出
+  const allRegistered = Object.entries(profileManager.profiles)
     .filter(([, p]) => p.userFields?.name)
     .map(([uid]) => uid);
 
+  const memberChecks = await Promise.all(
+    allRegistered.map(uid =>
+      guild.members.fetch(uid).then(() => uid).catch(() => null)
+    )
+  );
+  const registered = memberChecks.filter(Boolean);
+
   if (registered.length === 0) {
-    console.log("[Bot] プロフィール登録者なし、スキップ");
+    console.log("[Bot] プロフィール登録者なし（このサーバー）、スキップ");
     return;
   }
 
   // ランダムに1〜2人を選択
   const shuffled = [...registered].sort(() => Math.random() - 0.5);
   const targets = shuffled.slice(0, Math.min(2, shuffled.length));
-
-  const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
-  if (!channel?.isTextBased()) return;
 
   for (const userId of targets) {
     const profile = profileManager.profiles[userId];
