@@ -469,7 +469,6 @@ const SURVIVAL_KEYWORDS = [
   "死なないで", "死なないでください", "死なないでほしい", "死ぬな",
   "消えないで", "消えないでください", "消えないでほしい",
   "いなくならないで", "いなくなるな", "いなくならないでほしい",
-  "死なないで", "消えないで",
 ];
 
 function isSurvivalMessage(text) {
@@ -1279,10 +1278,12 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // 資料室チャンネル：!lore コマンドのみ受け付ける
+  // 資料室チャンネル：!lore コマンドのみ受け付ける（管理者のみ）
   if (isLoreCh) {
     const c = message.content.trim();
     if (c === "!lore" || c.startsWith("!lore ")) {
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
       await handleLoreCommand(message);
     }
     return;
@@ -1596,6 +1597,8 @@ client.on("messageCreate", async (message) => {
     }
 
     case "!reload": {
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
       const ok = loadMessages();
       if (ok) {
         const summary = Object.entries(messageLists).map(([k, v]) => `${k}: ${v.length}件`).join("\n");
