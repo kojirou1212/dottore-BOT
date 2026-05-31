@@ -135,6 +135,7 @@ const loreChannelIds = new Set(
 );
 const vcNotifyChannelId = config.discord.vcNotifyChannelId || [...new Set(config.discord.targetChannelIds)][0];
 const zatsuChannelId = config.discord.zatsuChannelId || "";
+const debugChannelId = config.discord.debugChannelId || "";
 const jihouChannelIds = new Set(config.discord.jihouChannelIds ?? []);
 
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
@@ -518,11 +519,8 @@ function scheduleMutter() {
       console.log("[Bot] 独り言発動");
       // テキストチャンネルに行動描写を送信
       const actionMsg = pick("vc_mutter");
-      const notifyChannelId = vcNotifyChannelId;
-      if (actionMsg && notifyChannelId) {
-        client.channels.fetch(notifyChannelId)
-          .then((ch) => ch?.send(actionMsg))
-          .catch(() => {});
+      if (actionMsg) {
+        notifyText(actionMsg);
       }
       // 独り言の余韻（20%）：15〜45秒後にもう一言
       if (Math.random() < 0.20) {
@@ -530,8 +528,8 @@ function scheduleMutter() {
         setTimeout(() => {
           if (!vcHandler.isConnected() || isFocused) return;
           const echoMsg = pick("vc_mutter_echo");
-          if (echoMsg && notifyChannelId) {
-            client.channels.fetch(notifyChannelId).then((ch) => ch?.send(echoMsg)).catch(() => {});
+          if (echoMsg) {
+            notifyText(echoMsg);
           }
         }, echoDelay);
       }
@@ -549,11 +547,7 @@ async function doFocusMode() {
   if (isFocused || !vcHandler.isConnected()) return;
   isFocused = true;
   clearMutterTimer();
-  const notifyChannelId = vcNotifyChannelId;
-  if (notifyChannelId) {
-    const msg = pick("vc_focus_start") || "（実験が佳境に入っている）";
-    client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
-  }
+  notifyText(pick("vc_focus_start") || "（実験が佳境に入っている）");
   console.log("[Bot] 集中モード開始");
   const durationMs = (5 + Math.random() * 5) * 60 * 1000; // 5〜10分
   focusTimer = setTimeout(() => {
@@ -601,9 +595,8 @@ function scheduleTempLeave(capricious = false) {
     // 退席前の予兆（25%）：1〜3分前にほのめかし
     if (Math.random() < 0.25) {
       const hintMsg = pick("vc_pre_leave");
-      const notifyChannelId = vcNotifyChannelId;
-      if (hintMsg && notifyChannelId) {
-        client.channels.fetch(notifyChannelId).then((ch) => ch?.send(hintMsg)).catch(() => {});
+      if (hintMsg) {
+        notifyText(hintMsg);
       }
       await new Promise((r) => setTimeout(r, (60 + Math.random() * 120) * 1000));
       if (!vcHandler.isConnected() || isTemporarilyAway) return;
@@ -623,11 +616,7 @@ async function doTempLeave() {
 
   vcHandler.leave(); // vc-state.json は保持（戻るため）
 
-  const notifyChannelId = vcNotifyChannelId;
-  if (notifyChannelId) {
-    const msg = pick("vc_tempout") || "……少し席を外す。";
-    client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
-  }
+  notifyText(pick("vc_tempout") || "……少し席を外す。");
   console.log("[Bot] 途中退席");
 
   // 5〜10分後に戻る
@@ -660,11 +649,7 @@ async function doTempReturn() {
       const now = Date.now();
       fresh.members.forEach((m) => { if (!m.user.bot && !userJoinTimes.has(m.id)) userJoinTimes.set(m.id, now); });
       scheduleLongStayCheck();
-      const notifyChannelId = vcNotifyChannelId;
-      if (notifyChannelId) {
-        const msg = pick("vc_return") || "……戻った。";
-        client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
-      }
+      notifyText(pick("vc_return") || "……戻った。");
       console.log("[Bot] 途中退席から復帰");
     } else {
       console.warn("[Bot] 途中退席からの復帰失敗");
@@ -690,14 +675,11 @@ function scheduleLongStayCheck() {
   longStayTimer = setInterval(async () => {
     if (!vcHandler.isConnected()) return;
     const now = Date.now();
-    const notifyChannelId = vcNotifyChannelId;
-    if (!notifyChannelId) return;
     for (const [userId, joinTime] of userJoinTimes) {
       const stayMin = (now - joinTime) / 60000;
       if (stayMin >= 180 && Math.random() < 0.20) { // 3時間以上で言及
         const msg = pick("vc_long_stay") || "……まだいるのか。粘るな。";
-        const ch = await client.channels.fetch(notifyChannelId).catch(() => null);
-        if (ch) await ch.send(msg).catch(() => {});
+        notifyText(msg);
         userJoinTimes.set(userId, now); // 次の3時間をリセット
         break; // 1回のチェックで1件だけ送信
       }
@@ -734,12 +716,7 @@ function scheduleVCIdle() {
     if (!vcHandler.isConnected()) return;
     const msg = pick("vc_idle");
     if (!msg) return;
-    const notifyChannelId = vcNotifyChannelId;
-    if (!notifyChannelId) return;
-    try {
-      const ch = await client.channels.fetch(notifyChannelId);
-      if (ch?.isTextBased()) await ch.send(msg);
-    } catch (_) {}
+    notifyText(msg);
     scheduleVCIdle();
   }, VC_IDLE_MS);
 }
@@ -799,11 +776,8 @@ function makeListenCallback() {
           const spamRate = Math.min(currentSkipRate + 0.30, 0.90);
           if (Math.random() < spamRate) {
             if (Math.random() < 0.25) {
-              const notifyChannelId = vcNotifyChannelId;
               const msg = pick("vc_spam") || "……うるさい。少し黙れ。";
-              if (notifyChannelId) {
-                client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
-              }
+              notifyText(msg);
             }
             console.log(`[Bot] 連続発言スキップ [${speakerId}] count=${speaker.count}`);
             return;
@@ -844,11 +818,8 @@ function makeListenCallback() {
             const ignoreMs = (3 + Math.random() * 7) * 60 * 1000; // 3〜10分無視
             ignoredUsers.set(speakerId, Date.now() + ignoreMs);
             userResponseTrack.delete(speakerId);
-            const notifyChannelId = vcNotifyChannelId;
             const msg = pick("vc_kinoseikas") || "……気のせいか。";
-            if (notifyChannelId) {
-              client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
-            }
+            notifyText(msg);
             console.log(`[Bot] 気のせいかモード [${speakerId}] ${Math.round(ignoreMs / 60000)}分無視`);
           }
         } else {
@@ -902,6 +873,15 @@ function pick(listName) {
   const list = messageLists[listName];
   if (!list || list.length === 0) return null;
   return list[Math.floor(Math.random() * list.length)];
+}
+
+function notifyText(text) {
+  const ids = [...new Set([vcNotifyChannelId, debugChannelId].filter(Boolean))];
+  for (const id of ids) {
+    client.channels.fetch(id)
+      .then(ch => { if (ch) ch.send(text).catch(() => {}); })
+      .catch(() => {});
+  }
 }
 
 function splitMessage(text, maxLength) {
@@ -1162,11 +1142,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
           freshCh.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
           scheduleLongStayCheck();
           saveVCState(newState.guild.id, freshCh.id);
-          const notifyChannelId = vcNotifyChannelId;
-          if (notifyChannelId) {
-            const msg = pick("vc_autojoin") || "……気が向いた。観察を開始する。";
-            client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
-          }
+          notifyText(pick("vc_autojoin") || "……気が向いた。観察を開始する。");
           console.log(`[Bot] 自動参加: ${freshCh.name}`);
         }, waitMs);
       }
@@ -1193,8 +1169,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
   ) {
     userJoinTimes.set(newState.member.id, Date.now()); // ⑥ 参加時刻を記録
     scheduleVCIdle();
-    const notifyChannelId = vcNotifyChannelId;
-    if (notifyChannelId) {
+    {
       let reactMsg;
       const joinHour = getJSTHour();
       const leaveTs = sessionLeavers.get(newState.member.id);
@@ -1213,9 +1188,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         reactMsg = pick("vc_join");
       }
       if (reactMsg) {
-        client.channels.fetch(notifyChannelId)
-          .then((ch) => ch?.send(reactMsg))
-          .catch(() => {});
+        notifyText(reactMsg);
       }
     }
   }
@@ -1228,10 +1201,9 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     userJoinTimes.delete(oldState.member.id); // ⑥ 退出で削除
     sessionLeavers.set(oldState.member.id, Date.now()); // 再入室検知用に記録
     if (humanCount > 0 && Math.random() < 0.40) { // まだ誰かいる場合のみ反応
-      const notifyChannelId = vcNotifyChannelId;
       const msg = pick("vc_leave");
-      if (msg && notifyChannelId) {
-        client.channels.fetch(notifyChannelId).then((ch) => ch?.send(msg)).catch(() => {});
+      if (msg) {
+        notifyText(msg);
       }
     }
   }
@@ -1265,12 +1237,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         clearVCState();
         console.log("[Bot] 無人のため自動退出しました。");
         // テキストチャンネルに通知
-        const notifyChannelId = vcNotifyChannelId;
-        if (notifyChannelId) {
-          client.channels.fetch(notifyChannelId)
-            .then((ch) => ch?.send("……観察終了、記録した。退出する。"))
-            .catch(() => {});
-        }
+        notifyText("……観察終了、記録した。退出する。");
       }
     }, 5000);
   } else {
