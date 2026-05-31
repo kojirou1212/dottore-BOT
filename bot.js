@@ -1019,6 +1019,19 @@ const PROFILE_MSG_TYPES = [
     },
   },
   {
+    id: "summon",
+    label: "対話室招集",
+    suffix: "\n<#1510269253398298735>",
+    build: (p) => {
+      const name = p.userFields.name || p.displayName;
+      return (
+        `ドットーレ（傲慢・冷静・知的、「お前」呼び）として、被検体「${name}」に` +
+        `「対話室に来い、話がある」という趣旨をひとこと伝える。命令口調で、理由は一切説明しない。` +
+        `チャンネル名や場所には触れない。1文のみ。地の文不要。`
+      );
+    },
+  },
+  {
     id: "nameCall",
     label: "協力感謝",
     build: (p) => {
@@ -1056,11 +1069,12 @@ async function sendRandomProfileMessages() {
 
   for (const userId of targets) {
     const profile = profileManager.profiles[userId];
-    // 7種類からランダム選択（nameCallは確率低め）
+    // nameCall/summonは確率低め、それ以外は2倍重み
+    const lowWeight = new Set(["nameCall", "summon"]);
     const pool = [
-      ...PROFILE_MSG_TYPES.filter(t => t.id !== "nameCall"),
-      ...PROFILE_MSG_TYPES.filter(t => t.id !== "nameCall"),
-      PROFILE_MSG_TYPES.find(t => t.id === "nameCall"),
+      ...PROFILE_MSG_TYPES.filter(t => !lowWeight.has(t.id)),
+      ...PROFILE_MSG_TYPES.filter(t => !lowWeight.has(t.id)),
+      ...PROFILE_MSG_TYPES.filter(t => lowWeight.has(t.id)),
     ];
     const type = pool[Math.floor(Math.random() * pool.length)];
 
@@ -1069,7 +1083,7 @@ async function sendRandomProfileMessages() {
       const text = await aiHandler.generateSimple(prompt, 80);
       if (!text || text.length < 5) continue;
 
-      await channel.send(`<@${userId}>\n${text}`);
+      await channel.send(`<@${userId}>\n${text}${type.suffix || ""}`);
       console.log(`[Bot] プロフィールメッセージ送信 [${userId}] type=${type.id}`);
       await new Promise(r => setTimeout(r, 4000));
     } catch (err) {
