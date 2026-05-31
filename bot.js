@@ -945,8 +945,7 @@ function startScheduler() {
     if (!text) return;
 
     console.log(`[Scheduler] 定時メッセージ送信 hour=${hour} list=${listName}`);
-    const jihouTargets = new Set([...targetChannelIds, ...jihouChannelIds]);
-    for (const channelId of jihouTargets) {
+    for (const channelId of jihouChannelIds) {
       try {
         const channel = await client.channels.fetch(channelId);
         if (!channel || !channel.isTextBased()) continue;
