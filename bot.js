@@ -137,6 +137,8 @@ const vcNotifyChannelId = config.discord.vcNotifyChannelId || [...new Set(config
 const zatsuChannelId = config.discord.zatsuChannelId || "";
 const debugChannelId = config.discord.debugChannelId || "";
 const jihouChannelIds = new Set(config.discord.jihouChannelIds ?? []);
+const restrictedVCChannelIds = new Set(config.discord.restrictedVCChannelIds ?? []);
+const restrictedVCNotifyChannelId = config.discord.restrictedVCNotifyChannelId || "";
 
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
@@ -875,7 +877,9 @@ function pick(listName) {
 }
 
 function notifyText(text) {
-  const ids = [...new Set([vcNotifyChannelId, debugChannelId].filter(Boolean))];
+  const ids = (currentVCChannel && restrictedVCChannelIds.has(currentVCChannel.id) && restrictedVCNotifyChannelId)
+    ? [restrictedVCNotifyChannelId]
+    : [...new Set([vcNotifyChannelId, debugChannelId].filter(Boolean))];
   for (const id of ids) {
     client.channels.fetch(id)
       .then(ch => { if (ch) ch.send(text).catch(() => {}); })
