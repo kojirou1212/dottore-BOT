@@ -592,7 +592,7 @@ ${soundList}
   }
 
   // ── Gemini API による文字起こし ──────────────────────────────────────────
-  async _transcribeAudio(wavBuffer, maxRetries = 3) {
+  async _transcribeAudio(wavBuffer, maxRetries = 2) {
     const apiKey = this.config.gemini.apiKey;
     const model = this.config.gemini.sttModel || "gemini-1.5-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -624,12 +624,15 @@ ${soundList}
       const data = await res.json();
       if (!res.ok) {
         const msg = data.error?.message ?? res.statusText;
-        const isRetryable = res.status === 503 || res.status === 429 ||
+        const is503 = res.status === 503;
+        const is429 = res.status === 429 ||
           msg.includes("high demand") || msg.includes("rate") || msg.includes("quota");
         lastError = new Error(`Gemini STT error: ${msg}`);
-        if (isRetryable && attempt < maxRetries) {
-          const waitMs = (2 ** attempt) * 1000 + Math.random() * 500;
-          console.warn(`[VCHandler] STTリトライ ${attempt + 1}/${maxRetries} (${Math.round(waitMs)}ms後)`);
+        // 503はサービス障害なので1回だけリトライ、429はレート制限なので指数バックオフ
+        const shouldRetry = (is503 && attempt < 1) || (is429 && attempt < maxRetries);
+        if (shouldRetry) {
+          const waitMs = is503 ? 2000 : (2 ** attempt) * 1000 + Math.random() * 500;
+          console.warn(`[VCHandler] STTリトライ ${attempt + 1} (${is503 ? "503" : "429"}, ${Math.round(waitMs)}ms後)`);
           await new Promise((r) => setTimeout(r, waitMs));
           continue;
         }
