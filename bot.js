@@ -940,191 +940,7 @@ function startScheduler() {
   }, 60 * 1000);
 }
 
-// ─── プロフィール登録者へのランダムメッセージ ─────────────────────────────
 
-// 7種類のメッセージタイプ定義
-const PROFILE_MSG_TYPES = [
-  {
-    id: "observation",
-    label: "観察通知",
-    build: (p) => {
-      const name  = p.userFields.name || p.displayName;
-      const hobby = p.userFields.hobby ? `趣味は${p.userFields.hobby}` : "";
-      const obs   = p.botRecord.observation ? `評価：${p.botRecord.observation}` : "";
-      const info  = [hobby, obs].filter(Boolean).join("、");
-      return (
-        `ドットーレ（傲慢・冷静・知的、「お前」呼び）として、被検体「${name}」${info ? "（" + info + "）" : ""}を` +
-        `観察している博士が、ふと思い出したようにひとこと呟く。1文のみ。地の文・説明不要。`
-      );
-    },
-  },
-  {
-    id: "question",
-    label: "突発質問",
-    build: (p) => {
-      const name    = p.userFields.name || p.displayName;
-      const hobby   = p.userFields.hobby ? `趣味：${p.userFields.hobby}` : "";
-      const tendency = p.userFields.tendency ? `傾向：${p.userFields.tendency}` : "";
-      const info    = [hobby, tendency].filter(Boolean).join("、");
-      return (
-        `ドットーレ（傲慢・知的、「お前」呼び）として、被検体「${name}」${info ? "（" + info + "）" : ""}に` +
-        `前置きなく唐突に質問をひとこと投げかける。1文のみ。地の文・説明不要。`
-      );
-    },
-  },
-  {
-    id: "experiment",
-    label: "実験招待",
-    build: (p) => {
-      const name = p.userFields.name || p.displayName;
-      return (
-        `ドットーレ（傲慢・研究者気質、「お前」呼び）として、被検体「${name}」に` +
-        `「何か実験したいことがある」というニュアンスでさらっとひとこと言う。具体的な内容には触れない。1文のみ。地の文不要。`
-      );
-    },
-  },
-  {
-    id: "checkin",
-    label: "生存確認",
-    build: (p) => {
-      const name = p.userFields.name || p.displayName;
-      return (
-        `ドットーレ（冷静・感情を表に出さない、「お前」呼び）として、被検体「${name}」に` +
-        `心配を悟らせずに生存確認をするひとこと。淡々と、さらっと。1文のみ。地の文不要。`
-      );
-    },
-  },
-  {
-    id: "provocation",
-    label: "知的挑発",
-    build: (p) => {
-      const name     = p.userFields.name || p.displayName;
-      const tendency = p.userFields.tendency ? `傾向：${p.userFields.tendency}` : "";
-      const weakness = p.userFields.weakness ? `弱点：${p.userFields.weakness}` : "";
-      const info     = [tendency, weakness].filter(Boolean).join("、");
-      return (
-        `ドットーレ（皮肉的・知的、「お前」呼び）として、被検体「${name}」${info ? "（" + info + "）" : ""}の` +
-        `矛盾や弱点を軽くつついくような皮肉をひとこと言う。攻撃的にならず観察者として。1文のみ。地の文不要。`
-      );
-    },
-  },
-  {
-    id: "musing",
-    label: "思索の断片",
-    build: (p) => {
-      const name  = p.userFields.name || p.displayName;
-      const hobby = p.userFields.hobby ? `趣味：${p.userFields.hobby}` : "";
-      const obs   = p.botRecord.observation ? `評価：${p.botRecord.observation}` : "";
-      const info  = [hobby, obs].filter(Boolean).join("、");
-      return (
-        `ドットーレ（知的・内省的）として、被検体「${name}」${info ? "（" + info + "）" : ""}に関連するような` +
-        `研究の断片を独り言のようにひとこと呟く。被検体への言及は匂わせる程度。1文のみ。地の文不要。`
-      );
-    },
-  },
-  {
-    id: "summon",
-    label: "対話室招集",
-    suffix: "\n<#1510269253398298735>",
-    build: (p) => {
-      const name = p.userFields.name || p.displayName;
-      return (
-        `ドットーレ（傲慢・冷静・知的、「お前」呼び）として、被検体「${name}」に` +
-        `「対話室に来い、話がある」という趣旨をひとこと伝える。命令口調で、理由は一切説明しない。` +
-        `チャンネル名や場所には触れない。1文のみ。地の文不要。`
-      );
-    },
-  },
-  {
-    id: "nameCall",
-    label: "協力感謝",
-    build: (p) => {
-      const count = p.botRecord.messageCount;
-      const obs   = p.botRecord.observation ? `評価：${p.botRecord.observation}` : "";
-      return (
-        `ドットーレ（冷静・傲慢、感情を表に出さない研究者）として、被検体（観測回数${count}回${obs ? "、" + obs : ""}）に` +
-        `「よろしく」や「協力に感謝する」にあたる一言を、感情を抑えた乾いた言葉でひとこと言う。` +
-        `「被検体」と呼ぶこと。あくまで研究者として淡々と。1文のみ。地の文不要。`
-      );
-    },
-  },
-];
-
-async function sendRandomProfileMessages() {
-  const notifyChannelId = vcNotifyChannelId;
-  if (!notifyChannelId) return;
-
-  const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
-  if (!channel?.isTextBased()) return;
-  const guild = channel.guild;
-
-  // 呼び名が登録されており、このギルドのメンバーであるユーザーのみ抽出
-  const allRegistered = Object.entries(profileManager.profiles)
-    .filter(([, p]) => p.userFields?.name)
-    .map(([uid]) => uid);
-
-  const memberChecks = await Promise.all(
-    allRegistered.map(uid =>
-      guild.members.fetch(uid).then(() => uid).catch(() => null)
-    )
-  );
-  const registered = memberChecks.filter(Boolean);
-
-  if (registered.length === 0) {
-    console.log("[Bot] プロフィール登録者なし（このサーバー）、スキップ");
-    return;
-  }
-
-  // ランダムに1〜2人を選択
-  const shuffled = [...registered].sort(() => Math.random() - 0.5);
-  const targets = shuffled.slice(0, Math.min(2, shuffled.length));
-
-  for (const userId of targets) {
-    const profile = profileManager.profiles[userId];
-    // nameCall/summonは確率低め、それ以外は2倍重み
-    const lowWeight = new Set(["nameCall", "summon"]);
-    const pool = [
-      ...PROFILE_MSG_TYPES.filter(t => !lowWeight.has(t.id)),
-      ...PROFILE_MSG_TYPES.filter(t => !lowWeight.has(t.id)),
-      ...PROFILE_MSG_TYPES.filter(t => lowWeight.has(t.id)),
-    ];
-    const type = pool[Math.floor(Math.random() * pool.length)];
-
-    try {
-      const prompt = type.build(profile);
-      const text = await aiHandler.generateSimple(prompt, 80);
-      if (!text || text.length < 5) continue;
-
-      await channel.send(`<@${userId}>\n${text}${type.suffix || ""}`);
-      console.log(`[Bot] プロフィールメッセージ送信 [${userId}] type=${type.id}`);
-      await new Promise(r => setTimeout(r, 4000));
-    } catch (err) {
-      console.error(`[Bot] プロフィールメッセージエラー [${userId}]:`, err.message);
-    }
-  }
-}
-
-// JST 11:00〜21:00 の間でランダムな時刻に毎日1回送信
-let profileMsgTimer = null;
-function scheduleProfileMessages() {
-  if (profileMsgTimer) { clearTimeout(profileMsgTimer); profileMsgTimer = null; }
-
-  const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-  const targetHour = Math.floor(Math.random() * 11) + 11; // 11〜21時
-  const targetMin  = Math.floor(Math.random() * 60);
-
-  let delayMs = ((targetHour - now.getHours()) * 60 + (targetMin - now.getMinutes())) * 60000;
-  if (delayMs <= 60000) delayMs += 24 * 60 * 60 * 1000; // 1分以内なら翌日に
-
-  const hh = String(targetHour).padStart(2, "0");
-  const mm = String(targetMin).padStart(2, "0");
-  console.log(`[Bot] 次回プロフィールメッセージ: ${hh}:${mm} JST (${Math.round(delayMs / 60000)}分後)`);
-
-  profileMsgTimer = setTimeout(async () => {
-    await sendRandomProfileMessages();
-    scheduleProfileMessages();
-  }, delayMs);
-}
 
 // ─── Ready ────────────────────────────────────────────────────────────────
 client.once("clientReady", async () => {
@@ -1133,7 +949,6 @@ client.once("clientReady", async () => {
   console.log(`[Bot] 使用モデル: ${config.grok.model}`);
   resetDailyMood();
   startScheduler();
-  scheduleProfileMessages();
   await autoRejoinVC();
 });
 
@@ -1256,13 +1071,13 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         userResponseTrack.clear();
         ignoredUsers.clear();
         sessionLeavers.clear();
+        // テキストチャンネルに通知（チャンネル判定のためcurrentVCChannelクリア前に送る）
+        notifyText("……観察終了、記録した。退出する。");
         currentVCChannel = null;
         sessionStartTime = null;
         vcHandler.leave();
         clearVCState();
         console.log("[Bot] 無人のため自動退出しました。");
-        // テキストチャンネルに通知
-        notifyText("……観察終了、記録した。退出する。");
       }
     }, 5000);
   } else {
@@ -1574,48 +1389,26 @@ client.on("messageCreate", async (message) => {
     }
 
     case "!status": {
-      const now = Date.now();
-      const lines = ["……現状を報告する。\n"];
-
-      // 機嫌
       const moodLabel = dailyMood === "good" ? "良好" : dailyMood === "bad" ? "不調" : "普通";
       const moodNote  = dailyMood === "good" ? "（機嫌がいい）" : dailyMood === "bad" ? "（機嫌が悪い）" : "";
-      lines.push(`【本日の機嫌】${moodLabel}${moodNote}`);
+      const lines = [`【本日の機嫌】${moodLabel}${moodNote}`];
 
-      // VCステータス
-      if (isTemporarilyAway) {
-        lines.push("【VC状態】途中退席中（後で戻る）");
-      } else if (vcHandler.isConnected()) {
-        const chName = currentVCChannel?.name ?? "不明";
-        const elapsedMin = sessionStartTime ? Math.floor((now - sessionStartTime) / 60000) : 0;
-        const h = Math.floor(elapsedMin / 60);
-        const m = elapsedMin % 60;
-        const elapsed = h > 0 ? `${h}時間${m}分経過` : `${m}分経過`;
-        lines.push(`【VC状態】監視中 ─ 「${chName}」${elapsed}`);
-
-        const humanCount = currentVCChannel?.members?.filter((mb) => !mb.user.bot).size ?? 0;
-        lines.push(`【VC内人数】${humanCount}人`);
-
-        const skipRate = getSkipRate(humanCount);
-        const responseRate = Math.round((1 - skipRate) * 100);
-        lines.push(`【応答率（目安）】約${responseRate}%`);
+      // 被検体総評
+      const profileEntries = Object.values(profileManager.profiles).filter(p => p.userFields?.name);
+      if (profileEntries.length > 0) {
+        const subjectList = profileEntries.map(p => {
+          const parts = [p.userFields.name];
+          if (p.userFields.tendency) parts.push(`傾向:${p.userFields.tendency}`);
+          if (p.botRecord?.observation) parts.push(`評価:${p.botRecord.observation}`);
+          return parts.join("、");
+        }).join("\n");
+        const prompt =
+          `ドットーレ（冷静・傲慢・知的な研究者）として、以下の被検体たちについて全体的な総評を3文以内で述べよ。` +
+          `研究者として淡々と、感情を抑えた言葉で。地の文不要。\n\n${subjectList}`;
+        const assessment = await aiHandler.generateSimple(prompt, 200).catch(() => null);
+        lines.push(`\n【被検体総評】\n${assessment ?? "……データ不足だ。"}`);
       } else {
-        lines.push("【VC状態】未接続");
-      }
-
-      // 現在の状態
-      if (isFocused) {
-        lines.push("【現在の状態】集中モード中（応答制限中）");
-      } else if (isTemporarilyAway) {
-        lines.push("【現在の状態】途中退席中");
-      } else {
-        lines.push("【現在の状態】通常");
-      }
-
-      // 気のせいかモードで無視中
-      const ignoredCount = [...ignoredUsers.values()].filter((until) => until > now).length;
-      if (ignoredCount > 0) {
-        lines.push(`【一時無視中】${ignoredCount}人（気のせいかモード）`);
+        lines.push("\n【被検体総評】\n……登録された被検体がいない。");
       }
 
       await message.reply(lines.join("\n"));
@@ -1633,14 +1426,6 @@ client.on("messageCreate", async (message) => {
       } else {
         await message.reply("……読み込みに失敗した。messages.json の構文を確認しろ。");
       }
-      return;
-    }
-
-    case "!sendprofile": {
-      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
-      await message.reply("……送信する。");
-      sendRandomProfileMessages().catch(err => console.error("[Bot] !sendprofile エラー:", err.message));
       return;
     }
 
