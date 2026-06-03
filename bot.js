@@ -127,6 +127,7 @@ const profileManager = new ProfileManager();
 const knowledgeBase = new KnowledgeBase();
 const memoryManager = new MemoryManager();
 const targetChannelIds = new Set(config.discord.targetChannelIds);
+const commandOnlyChannelIds = new Set(config.discord.commandChannelIds ?? []);
 const profileChannelIds = new Set(
   (config.discord.profileChannelId || "")
     .split(",").map(s => s.trim()).filter(Boolean)
@@ -1109,7 +1110,8 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  const isTarget = targetChannelIds.has(message.channelId);
+  const isTarget = targetChannelIds.has(message.channelId) || commandOnlyChannelIds.has(message.channelId);
+  const isCommandOnly = commandOnlyChannelIds.has(message.channelId);
   const isProfileCh = profileChannelIds.size > 0
     && profileChannelIds.has(message.channelId)
     && !isTarget;
@@ -1459,6 +1461,8 @@ client.on("messageCreate", async (message) => {
       );
       return;
   }
+
+  if (isCommandOnly) return;
 
   // ── AI 応答 ───────────────────────────────────────────────────
   console.log(`[Bot] メッセージ受信 [${userTag}]: ${content.slice(0, 80)}`);
