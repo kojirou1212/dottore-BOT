@@ -36,9 +36,11 @@ if (process.env.DISCORD_TOKEN) {
     },
   };
 } else {
-  const configPath = path.join(__dirname, "config.json");
+  const configPath = process.env.CONFIG_PATH
+    ? path.resolve(__dirname, process.env.CONFIG_PATH)
+    : path.join(__dirname, "config.json");
   if (!fs.existsSync(configPath)) {
-    console.error("[Bot] config.json が見つかりません。");
+    console.error(`[Bot] 設定ファイルが見つかりません: ${configPath}`);
     process.exit(1);
   }
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -689,7 +691,9 @@ function scheduleLongStayCheck() {
 }
 
 // ─── VC状態の永続化（再起動後に自動再参加するため）─────────────────────────
-const VC_STATE_PATH = path.join(__dirname, "vc-state.json");
+const VC_STATE_PATH = process.env.VC_STATE_FILE
+  ? path.resolve(__dirname, process.env.VC_STATE_FILE)
+  : path.join(__dirname, "vc-state.json");
 
 function saveVCState(guildId, channelId) {
   try {
