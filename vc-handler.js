@@ -173,6 +173,8 @@ class VCHandler {
     this._speakingHandler = null;
     this._lastResponseTime = 0;
     this._cooldownMs = config.ai?.listenCooldownMs ?? 30000;
+    this._userLastSttTime = new Map(); // userId -> 最終STT時刻（ユーザーごとのレート制限）
+    this._userSttCooldownMs = config.ai?.sttUserCooldownMs ?? 20000;
     this._preFilter = null; // (userId) => boolean — true なら STT スキップ
 
     if (this.vcAvailable) {
@@ -491,6 +493,8 @@ ${soundList}
       if (Date.now() - this._lastResponseTime < this._cooldownMs) return;
       if (!this._transcriptCallback) return;
       if (this._preFilter && this._preFilter(userId)) return; // 集中モード・無視中をSTT前に排除
+      const userLastStt = this._userLastSttTime.get(userId) || 0;
+      if (Date.now() - userLastStt < this._userSttCooldownMs) return;
 
       const pcmChunks = [];
       const opusStream = receiver.subscribe(userId, {
@@ -550,6 +554,7 @@ ${soundList}
         } finally {
           this._activeStreams.delete(userId);
           this._lastResponseTime = Date.now(); // SILENT 含め常にリセット（バースト防止）
+          this._userLastSttTime.set(userId, Date.now());
         }
       });
 
@@ -582,6 +587,7 @@ ${soundList}
     }
     this._speakingHandler = null;
     this._transcriptCallback = null;
+    this._userLastSttTime.clear();
 
     for (const [, entry] of this._activeStreams) {
       entry.pcmChunks.length = 0;
