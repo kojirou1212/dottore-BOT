@@ -1435,6 +1435,37 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    case "!scan_profiles": {
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+
+      const profileChId = [...profileChannelIds][0];
+      if (!profileChId) {
+        await message.reply("……profileChannelId が設定されていない。");
+        return;
+      }
+      try {
+        const profileCh = await client.channels.fetch(profileChId);
+        const fetched = await profileCh.messages.fetch({ limit: 100 });
+        const userMessages = [...fetched.values()].filter(m => !m.author.bot);
+
+        let processed = 0;
+        for (const msg of userMessages) {
+          // 既に🔬リアクション済みならスキップ
+          const alreadyDone = msg.reactions.cache.get("🔬") != null;
+          if (alreadyDone) continue;
+          await handleProfilePost(msg);
+          processed++;
+          await new Promise(r => setTimeout(r, 800));
+        }
+        await message.reply(`……処理完了。${processed}件の被検体データを登録した。`);
+      } catch (err) {
+        console.error("[Bot] scan_profiles エラー:", err.message);
+        await message.reply("……処理中にエラーが発生した。");
+      }
+      return;
+    }
+
     case "!help":
       await message.reply(
         "【コマンド一覧】\n" +
@@ -1456,7 +1487,8 @@ client.on("messageCreate", async (message) => {
         "!memory clear                   … 記憶メモ消去\n" +
         "!say [テキスト]                 … 任意チャンネルで発言\n" +
         "!reload                         … messages.json 再読み込み\n" +
-        "!sendprofile                    … プロフィールメッセージを今すぐ送信\n\n" +
+        "!sendprofile                    … プロフィールメッセージを今すぐ送信\n" +
+        "!scan_profiles                  … プロフィールチャンネルの過去投稿を一括処理\n\n" +
         "それ以外のメッセージはドットーレが回答します。"
       );
       return;
