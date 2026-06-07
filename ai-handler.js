@@ -53,9 +53,9 @@ class AIHandler {
       } catch (err) {
         lastError = err;
         const msg = err.message || "";
+        const is503 = msg.includes("503") || msg.includes("UNAVAILABLE");
+        if (is503) break;
         const isRetryable =
-          msg.includes("503") ||
-          msg.includes("UNAVAILABLE") ||
           msg.includes("high demand") ||
           msg.includes("429") ||
           msg.includes("rate_limit") ||

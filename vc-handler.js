@@ -628,11 +628,11 @@ ${soundList}
         const is429 = res.status === 429 ||
           msg.includes("high demand") || msg.includes("rate") || msg.includes("quota");
         lastError = new Error(`Gemini STT error: ${msg}`);
-        // 503はサービス障害なので1回だけリトライ、429はレート制限なので指数バックオフ
-        const shouldRetry = (is503 && attempt < 1) || (is429 && attempt < maxRetries);
+        // 503はサービス障害なのでスキップ、429はレート制限なので指数バックオフ
+        const shouldRetry = !is503 && is429 && attempt < maxRetries;
         if (shouldRetry) {
-          const waitMs = is503 ? 2000 : (2 ** attempt) * 1000 + Math.random() * 500;
-          console.warn(`[VCHandler] STTリトライ ${attempt + 1} (${is503 ? "503" : "429"}, ${Math.round(waitMs)}ms後)`);
+          const waitMs = (2 ** attempt) * 1000 + Math.random() * 500;
+          console.warn(`[VCHandler] STTリトライ ${attempt + 1} (429, ${Math.round(waitMs)}ms後)`);
           await new Promise((r) => setTimeout(r, waitMs));
           continue;
         }
