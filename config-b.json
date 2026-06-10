@@ -1,7 +1,8 @@
 {
   "discord": {
     "token": "ここにBサーバ用のBotトークンを入力",
-    "targetChannelIds": [],
+    "targetChannelIds": ["1510269253398298735"],
+    "commandChannelIds": ["1510307091846402158"],
     "ttsBotIds": ["916300992612540467"],
     "profileChannelId": "1510268833426964530",
     "loreChannelId": "",
@@ -14,7 +15,7 @@
   },
   "gemini": {
     "apiKey": "ここにGemini APIキーを入力",
-    "sttModel": "gemini-2.0-flash-lite"
+    "sttModel": "gemini-2.5-flash"
   },
   "grok": {
     "apiKey": "ここにGrok APIキーを入力",
