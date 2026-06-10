@@ -927,6 +927,38 @@ function startScheduler() {
       return;
     }
 
+    // ── AI生成の朝メッセージ（config.discord.aiJihouChannelId が設定された時間に送信）──
+    const aiJihouEntries = config.discord.aiJihouSchedule ?? {};
+    const aiJihouChannelId = aiJihouEntries[String(hour)] ?? "";
+    if (aiJihouChannelId) {
+      try {
+        const topicsHint = getRecentTopicsHint();
+        const dateStr = `${now.getMonth() + 1}月${now.getDate()}日`;
+        const prompt =
+          `今日は${dateStr}の朝${hour}時だ。ドットーレ（冷静・傲慢・知的な研究者）として、被検体たちへの朝の挨拶メッセージを1つ生成せよ。\n\n` +
+          `制約：\n` +
+          `・必ず「おはよう、被検体。」で始めること\n` +
+          `・2〜3文、100〜150文字程度\n` +
+          `・語尾の例：「〜を期待している。」「…まあ、お前たちには関係のない話だがな。」「〜だ。」など、状況に合わせて自然に締めること\n` +
+          `・「いかがお過ごしだろうか」は使わないこと\n` +
+          `・傲慢・冷静・研究者視点。感情的な表現禁止。地の文不要\n` +
+          `・余分な説明や前置き不要。メッセージ本文のみ出力\n` +
+          (topicsHint ? `\n【最近のチャンネルの動向（参考）】\n${topicsHint}` : "");
+
+        console.log(`[Scheduler] AI朝メッセージ生成中 (${dateStr} ${hour}時)`);
+        const aiText = await aiHandler.generateSimple(prompt, 200);
+        if (aiText) {
+          const ch = await client.channels.fetch(aiJihouChannelId);
+          if (ch && ch.isTextBased()) {
+            await ch.send(aiText);
+            console.log("[Scheduler] AI朝メッセージ送信完了");
+          }
+        }
+      } catch (err) {
+        console.error("[Scheduler] AI朝メッセージエラー:", err.message);
+      }
+    }
+
     if (!(hour in scheduleMap)) return;
     const listName = scheduleMap[hour];
     const text = pick(listName);
