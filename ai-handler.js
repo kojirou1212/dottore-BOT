@@ -95,7 +95,7 @@ class AIHandler {
 
     const callGrok = async (model) => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
       let res;
       try {
         res = await fetch(url, {
@@ -180,7 +180,7 @@ class AIHandler {
 
     return this._callWithRetry(async () => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       let res;
       try {
         res = await fetch(url, {
