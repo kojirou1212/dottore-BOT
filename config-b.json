@@ -2,12 +2,12 @@
   "discord": {
     "token": "ここにBサーバ用のBotトークンを入力",
     "targetChannelIds": ["1510269253398298735"],
-    "commandChannelIds": ["1510307091846402158"],
+    "commandChannelIds": ["1510307091846402158", "1510458726405116086"],
     "ttsBotIds": ["916300992612540467"],
     "profileChannelId": "1510268833426964530",
     "loreChannelId": "",
     "vcNotifyChannelId": "1510307091846402158",
-    "debugChannelId": "",
+    "debugChannelId": "1510458726405116086",
     "zatsuChannelId": "",
     "jihouChannelIds": [],
     "restrictedVCChannelIds": ["1510266396788134012"],
@@ -15,7 +15,7 @@
   },
   "gemini": {
     "apiKey": "ここにGemini APIキーを入力",
-    "sttModel": "gemini-2.5-flash"
+    "sttModel": "gemini-2.5-flash-lite"
   },
   "grok": {
     "apiKey": "ここにGrok APIキーを入力",
