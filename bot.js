@@ -1,7 +1,7 @@
 // bot.js
 // Discord Bot メインエントリーポイント
 
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const AIHandler = require("./ai-handler");
@@ -118,7 +118,9 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.DirectMessages,
   ],
+  partials: [Partials.Channel],
 });
 
 const aiHandler = new AIHandler(config);
@@ -1197,6 +1199,10 @@ client.on("messageCreate", async (message) => {
 
   // ── !kanshi ───────────────────────────────────────────────────
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
+    if (!message.guild) {
+      await message.reply("……VCコマンドはサーバーチャンネルから実行しろ。");
+      return;
+    }
     if (vcHandler.isConnected()) {
       await message.reply("……既にVCに入っている。二重に参加する必要はない。");
       return;
