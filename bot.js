@@ -128,6 +128,17 @@ const vcHandler = new VCHandler(config);
 const profileManager = new ProfileManager();
 const knowledgeBase = new KnowledgeBase();
 const memoryManager = new MemoryManager();
+
+const USER_HINTS_PATH = path.join(__dirname, "user-hints.json");
+let userHints = {};
+try {
+  if (fs.existsSync(USER_HINTS_PATH)) {
+    userHints = JSON.parse(fs.readFileSync(USER_HINTS_PATH, "utf-8"));
+    console.log(`[Bot] ユーザー専用ヒント読み込み完了: ${Object.keys(userHints).length}件`);
+  }
+} catch (err) {
+  console.warn("[Bot] user-hints.json 読み込み失敗:", err.message);
+}
 const targetChannelIds = new Set(config.discord.targetChannelIds);
 const commandOnlyChannelIds = new Set(config.discord.commandChannelIds ?? []);
 const profileChannelIds = new Set(
@@ -1556,7 +1567,8 @@ client.on("messageCreate", async (message) => {
     const userBaseHint = knowledgeBase.getUserBaseHint(userId);
     const memoryHint = memoryManager.formatForContext(userId);
     const topicsHint = getRecentTopicsHint();
-    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, sentimentHint, topicsHint].filter(Boolean).join("\n\n") || undefined;
+    const userSpecificHint = userHints[userId] ?? null;
+    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, userSpecificHint, sentimentHint, topicsHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, content, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
