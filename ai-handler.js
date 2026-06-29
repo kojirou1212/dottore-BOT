@@ -113,7 +113,6 @@ class AIHandler {
               { role: "user", content: userMessage },
             ],
             max_tokens: this.config.grok.maxTokens,
-            temperature: 1.2,
           }),
         });
       } finally {
@@ -195,7 +194,6 @@ class AIHandler {
             model,
             messages: [{ role: "user", content: prompt }],
             max_tokens: maxTokens,
-            temperature: 1.2,
           }),
         });
       } finally {
