@@ -1609,6 +1609,9 @@ client.on("messageCreate", async (message) => {
     } catch (_) {
       await message.channel.send(config.ai.errorMessage).catch(() => {});
     }
+    client.channels.fetch("1510458726405116086").then((ch) => {
+      if (ch) ch.send(`[エラー] ${userTag}\n\`\`\`\n${error.stack ?? error.message}\n\`\`\``).catch(() => {});
+    }).catch(() => {});
   }
 });
 
