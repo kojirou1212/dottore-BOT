@@ -522,6 +522,7 @@ function clearMutterTimer() {
 }
 
 function scheduleMutter() {
+  if (config.features?.mutter === false) return;
   clearMutterTimer();
   if (!vcHandler.isConnected()) return;
   const delayMs = getMutterDelayMs();
@@ -576,6 +577,7 @@ async function doFocusMode() {
 }
 
 function scheduleFocusMode() {
+  if (config.features?.autoAction === false) return;
   clearFocusTimer();
   if (!vcHandler.isConnected() || isFocused) return;
   const delayMs = (15 + Math.random() * 30) * 60 * 1000; // 15〜45分後に判定
@@ -596,6 +598,7 @@ function clearTempLeaveTimer() {
 }
 
 function scheduleTempLeave(capricious = false) {
+  if (config.features?.autoAction === false) return;
   clearTempLeaveTimer();
   if (!vcHandler.isConnected()) return;
   // 気まま（自動参加）: 10〜25分後に55%の確率 / 通常: 20〜40分後に30%の確率
@@ -972,6 +975,7 @@ function startScheduler() {
       }
     }
 
+    if (config.features?.jihou === false) return;
     if (!(hour in scheduleMap)) return;
     const listName = scheduleMap[hour];
     const text = pick(listName);
@@ -1011,7 +1015,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
   if (!vcHandler.isConnected() && !isTemporarilyAway) {
     if (newState.channelId && newState.channelId !== oldState.channelId) {
       const targetCh = newState.channel;
-      if (targetCh?.isVoiceBased() && Math.random() < 0.35) {
+      if (config.features?.autoAction !== false && targetCh?.isVoiceBased() && Math.random() < 0.35) {
         const waitMs = 2000 + Math.random() * 3000; // 2〜5秒後に自然に参加
         setTimeout(async () => {
           if (vcHandler.isConnected() || isTemporarilyAway) return;
