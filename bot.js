@@ -1016,6 +1016,8 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         setTimeout(async () => {
           if (vcHandler.isConnected() || isTemporarilyAway) return;
           const freshCh = await newState.guild.channels.fetch(targetCh.id).catch(() => null);
+          if (!freshCh) return;
+          if (restrictedVCChannelIds.size > 0 && !restrictedVCChannelIds.has(freshCh.id)) return;
           const humans = freshCh?.members?.filter((m) => !m.user.bot).size ?? 0;
           if (humans === 0) return; // 待機中に誰もいなくなっていたら中止
           const joined = await vcHandler.join(freshCh).catch(() => false);
@@ -1245,6 +1247,10 @@ client.on("messageCreate", async (message) => {
         );
         return;
       }
+    }
+    if (restrictedVCChannelIds.size > 0 && !restrictedVCChannelIds.has(targetVC.id)) {
+      await message.reply("なんだそれは");
+      return;
     }
     if (!vcHandler.vcAvailable) {
       await message.reply("……VC参加には `@discordjs/voice` が必要だ。");
