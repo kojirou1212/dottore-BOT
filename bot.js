@@ -1093,7 +1093,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
   if (!vcHandler.isConnected() && !isTemporarilyAway) {
     if (newState.channelId && newState.channelId !== oldState.channelId) {
       const targetCh = newState.channel;
-      if (config.features?.autoAction !== false && targetCh?.isVoiceBased() && Math.random() < 0.35) {
+      if (config.features?.autoAction !== false && targetCh?.isVoiceBased() && Math.random() < 0.5) {
         const waitMs = 2000 + Math.random() * 3000; // 2〜5秒後に自然に参加
         setTimeout(async () => {
           if (vcHandler.isConnected() || isTemporarilyAway) return;
