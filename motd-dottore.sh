@@ -43,7 +43,7 @@ DSK_P=$(df / 2>/dev/null | awk 'NR==2{print $5}' | tr -d '%')
 DSK_C=$GN; (( DSK_P >= 80 )) && DSK_C=$RD || (( DSK_P >= 60 )) && DSK_C=$YL
 
 NOW=$(date '+%Y/%m/%d  %H:%M')
-LAST=$(last -1 -F "$USER" 2>/dev/null | awk 'NR==1{print $5,$6,$7,$8}')
+LAST=$(last -F 2>/dev/null | awk '!/reboot|wtmp|^$/{print $5,$6,$7,$8; exit}')
 
 W=62  # ボックス内側幅（ASCIIアート60文字に合わせる）
 
@@ -62,17 +62,16 @@ ctr() {
 }
 
 # プログレスバー（BAR と BAR_PLAIN にセット）
-# 塗り部分は col 色の █、空き部分はグレーの ▒ で視認性を確保
+# 塗り:col色の█  空き:グレーの░（ASCII括弧で幅計算を正確に保つ）
 mkbar() {
   local pct=$1 col=$2 w=26 filled="" empty="" i
   local f=$(( pct * w / 100 ))
-  local e=$(( w - f ))
   [[ $f -lt 0 ]] && f=0; [[ $f -gt $w ]] && f=$w
-  e=$(( w - f ))
+  local e=$(( w - f ))
   for ((i=0;i<f;i++)); do filled+="█"; done
-  for ((i=0;i<e;i++)); do empty+="▒"; done
-  BAR="${GR}▕${col}${filled}${GR}${empty}▏${R}"
-  BAR_PLAIN="▕${filled}${empty}▏"  # 幅 = w+2 文字
+  for ((i=0;i<e;i++)); do empty+="░"; done
+  BAR="${GR}[${col}${B}${filled}${R}${GR}${empty}]${R}"
+  BAR_PLAIN="[${filled}${empty}]"  # 幅 = w+2（ASCII only, ${#} = 実文字数）
 }
 
 # ラベル＋バー行
@@ -118,7 +117,7 @@ MB
 if [[ -n $LAST ]]; then
   ctr "Last login : $LAST" "${GR}"
 else
-  ctr "観察を開始する" "${GR}"
+  ctr "─── benvenuto nel sistema ───" "${GR}"
 fi
 BB
 echo
