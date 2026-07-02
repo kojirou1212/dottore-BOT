@@ -1073,12 +1073,77 @@ function startTimedMutter() {
 
 
 
+// ─── 起動バナー ───────────────────────────────────────────────────────────
+function printStartupBanner(tag, mood) {
+  const R = "\x1b[0m";
+  const BOLD = "\x1b[1m";
+  const DIM = "\x1b[2m";
+  const CYAN = "\x1b[36m";
+  const BLUE = "\x1b[34m";
+  const WHITE = "\x1b[37m";
+  const GRAY = "\x1b[90m";
+  const YELLOW = "\x1b[33m";
+  const RED = "\x1b[31m";
+
+  const moodLabel = mood === "good" ? `${YELLOW}良好${R}` : mood === "bad" ? `${RED}不調${R}` : `${WHITE}普通${R}`;
+  const modeLabel = BOT_MODE === "text" ? "text" : BOT_MODE === "vc" ? "vc" : "all";
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+
+
+  const W = 62; // 内側幅（╔～╗の間の文字数）
+
+  // 全角文字を2としてカウント
+  function vw(str) {
+    let w = 0;
+    for (const ch of str.replace(/\x1b\[[0-9;]*m/g, "")) {
+      const c = ch.codePointAt(0);
+      w += (c >= 0x1100 && (c <= 0x115F || (c >= 0x2E80 && c <= 0xA4CF) || (c >= 0xAC00 && c <= 0xD7A3) || (c >= 0xFF01 && c <= 0xFF60))) ? 2 : 1;
+    }
+    return w;
+  }
+
+  const blank = `${BLUE}║${R}${" ".repeat(W)}${BLUE}║${R}`;
+
+  function row(label, value) {
+    const inner = `  ${label}  ${value}`;
+    const pad = Math.max(0, W - vw(inner));
+    return `${BLUE}║${R}  ${GRAY}${label}${R}  ${value}${" ".repeat(pad)}${BLUE}║${R}`;
+  }
+
+  function centerLine(text, color = "") {
+    const len = vw(text);
+    const left = Math.floor((W - len) / 2);
+    const right = W - len - left;
+    return `${BLUE}║${R}${" ".repeat(left)}${color}${text}${R}${" ".repeat(right)}${BLUE}║${R}`;
+  }
+
+  console.log("");
+  console.log(`${BLUE}╔${"═".repeat(W)}╗${R}`);
+  console.log(centerLine("██████╗  ██████╗ ████████╗████████╗ ██████╗ ██████╗ ███████╗", BOLD + CYAN));
+  console.log(centerLine("██╔══██╗██╔═══██╗╚══██╔══╝╚══██╔══╝██╔═══██╗██╔══██╗██╔════╝", BOLD + CYAN));
+  console.log(centerLine("██║  ██║██║   ██║   ██║      ██║   ██║   ██║██████╔╝█████╗  ", BOLD + CYAN));
+  console.log(centerLine("██║  ██║██║   ██║   ██║      ██║   ██║   ██║██╔══██╗██╔══╝  ", BOLD + CYAN));
+  console.log(centerLine("██████╔╝╚██████╔╝   ██║      ██║   ╚██████╔╝██║  ██║███████╗", BOLD + CYAN));
+  console.log(centerLine("╚═════╝  ╚═════╝    ╚═╝      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚══════╝", BOLD + CYAN));
+  console.log(blank);
+  console.log(centerLine("Sistema  di  ricerca  avviato", DIM + WHITE));
+  console.log(`${BLUE}╠${"═".repeat(W)}╣${R}`);
+  console.log(blank);
+  console.log(row("BOT TAG  :", `${BOLD}${WHITE}${tag}${R}`));
+  console.log(row("MODE     :", `${CYAN}${modeLabel}${R}`));
+  console.log(row("MODEL    :", `${CYAN}${config.grok.model}${R}`));
+  console.log(row("CHANNELS :", `${WHITE}${targetChannelIds.size} ch${R}`));
+  console.log(row("MOOD     :", moodLabel));
+  console.log(row("STARTED  :", `${DIM}${now}${R}`));
+  console.log(blank);
+  console.log(`${BLUE}╚${"═".repeat(W)}╝${R}`);
+  console.log("");
+}
+
 // ─── Ready ────────────────────────────────────────────────────────────────
 client.once("clientReady", async () => {
-  console.log(`[Bot] ログイン完了: ${client.user.tag}`);
-  console.log(`[Bot] 監視チャンネル数: ${targetChannelIds.size}`);
-  console.log(`[Bot] 使用モデル: ${config.grok.model}`);
   resetDailyMood();
+  printStartupBanner(client.user.tag, dailyMood);
   startScheduler();
   startTimedMutter();
   await autoRejoinVC();
