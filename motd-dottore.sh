@@ -62,16 +62,17 @@ ctr() {
 }
 
 # プログレスバー（BAR と BAR_PLAIN にセット）
+# 塗り部分は col 色の █、空き部分はグレーの ▒ で視認性を確保
 mkbar() {
-  local pct=$1 col=$2 w=26 b="" i
+  local pct=$1 col=$2 w=26 filled="" empty="" i
   local f=$(( pct * w / 100 ))
   local e=$(( w - f ))
-  [[ $f -lt 0 ]] && f=0; [[ $e -lt 0 ]] && e=0
-  [[ $f -gt $w ]] && f=$w; e=$(( w - f ))
-  for ((i=0;i<f;i++)); do b+="█"; done
-  for ((i=0;i<e;i++)); do b+="░"; done
-  BAR="${GR}[${col}${b}${GR}]${R}"
-  BAR_PLAIN="[${b}]"  # 幅 = w+2 文字
+  [[ $f -lt 0 ]] && f=0; [[ $f -gt $w ]] && f=$w
+  e=$(( w - f ))
+  for ((i=0;i<f;i++)); do filled+="█"; done
+  for ((i=0;i<e;i++)); do empty+="▒"; done
+  BAR="${GR}▕${col}${filled}${GR}${empty}▏${R}"
+  BAR_PLAIN="▕${filled}${empty}▏"  # 幅 = w+2 文字
 }
 
 # ラベル＋バー行
