@@ -1117,27 +1117,20 @@ function printStartupBanner(tag, mood) {
     return `${BLUE}║${R}${" ".repeat(left)}${color}${text}${R}${" ".repeat(right)}${BLUE}║${R}`;
   }
 
-  console.log("");
-  console.log(`${BLUE}╔${"═".repeat(W)}╗${R}`);
-  console.log(centerLine("██████╗  ██████╗ ████████╗████████╗ ██████╗ ██████╗ ███████╗", BOLD + CYAN));
-  console.log(centerLine("██╔══██╗██╔═══██╗╚══██╔══╝╚══██╔══╝██╔═══██╗██╔══██╗██╔════╝", BOLD + CYAN));
-  console.log(centerLine("██║  ██║██║   ██║   ██║      ██║   ██║   ██║██████╔╝█████╗  ", BOLD + CYAN));
-  console.log(centerLine("██║  ██║██║   ██║   ██║      ██║   ██║   ██║██╔══██╗██╔══╝  ", BOLD + CYAN));
-  console.log(centerLine("██████╔╝╚██████╔╝   ██║      ██║   ╚██████╔╝██║  ██║███████╗", BOLD + CYAN));
-  console.log(centerLine("╚═════╝  ╚═════╝    ╚═╝      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚══════╝", BOLD + CYAN));
-  console.log(blank);
-  console.log(centerLine("Sistema  di  ricerca  avviato", DIM + WHITE));
-  console.log(`${BLUE}╠${"═".repeat(W)}╣${R}`);
-  console.log(blank);
-  console.log(row("BOT TAG  :", `${BOLD}${WHITE}${tag}${R}`));
-  console.log(row("MODE     :", `${CYAN}${modeLabel}${R}`));
-  console.log(row("MODEL    :", `${CYAN}${config.grok.model}${R}`));
-  console.log(row("CHANNELS :", `${WHITE}${targetChannelIds.size} ch${R}`));
-  console.log(row("MOOD     :", moodLabel));
-  console.log(row("STARTED  :", `${DIM}${now}${R}`));
-  console.log(blank);
-  console.log(`${BLUE}╚${"═".repeat(W)}╝${R}`);
-  console.log("");
+  // ┌ 15行以内に収める（PM2 last 15 lines 対応） ┐
+  console.log("");                                                                          // 1
+  console.log(`${BLUE}╔${"═".repeat(W)}╗${R}`);                                           // 2
+  console.log(centerLine(`◆  D O T T O R E  ◆`, BOLD + CYAN));                           // 3
+  console.log(centerLine("Sistema  di  ricerca  avviato", DIM + WHITE));                  // 4
+  console.log(`${BLUE}╠${"═".repeat(W)}╣${R}`);                                           // 5
+  console.log(row("BOT TAG  :", `${BOLD}${WHITE}${tag}${R}`));                            // 6
+  console.log(row("MODE     :", `${CYAN}${modeLabel}${R}`));                              // 7
+  console.log(row("MODEL    :", `${CYAN}${config.grok.model}${R}`));                      // 8
+  console.log(row("CHANNELS :", `${WHITE}${targetChannelIds.size} ch${R}`));              // 9
+  console.log(row("MOOD     :", moodLabel));                                               // 10
+  console.log(row("STARTED  :", `${DIM}${now}${R}`));                                     // 11
+  console.log(`${BLUE}╚${"═".repeat(W)}╝${R}`);                                           // 12
+  console.log("");                                                                          // 13
 }
 
 // ─── Ready ────────────────────────────────────────────────────────────────
