@@ -1,104 +1,118 @@
 #!/bin/bash
 # /etc/update-motd.d/01-dottore
-# SSH ログイン時に表示されるカスタムバナー
+# $'...' 記法で ESC 文字を正しく展開する
 
-# ─── カラー定義 ───────────────────────────────────────────────
-R='\033[0m'
-BOLD='\033[1m'
-DIM='\033[2m'
-CYAN='\033[36m'
-BLUE='\033[34m'
-WHITE='\033[37m'
-GRAY='\033[90m'
-YELLOW='\033[33m'
-RED='\033[31m'
-GREEN='\033[32m'
+# ─── カラー ──────────────────────────────────────────────────
+R=$'\e[0m';  B=$'\e[1m';  D=$'\e[2m'
+CY=$'\e[36m'; BL=$'\e[34m'; WT=$'\e[37m'
+GR=$'\e[90m'; YL=$'\e[33m'; RD=$'\e[31m'; GN=$'\e[32m'
 
-# ─── システム情報の取得 ───────────────────────────────────────
+# ─── システム情報 ─────────────────────────────────────────────
 HOST=$(hostname)
-IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -z "$IP" ] && IP="不明"
+IP=$(hostname -I 2>/dev/null | awk '{print $1}'); [[ -z $IP ]] && IP="—"
+UPTIME=$(uptime -p 2>/dev/null \
+  | sed 's/^up //; s/ weeks\?/w/g; s/ days\?/d/g; s/ hours\?/h/g; s/ minutes\?/m/g; s/,//g')
 
-UPTIME=$(uptime -p 2>/dev/null | sed 's/^up //' || echo "不明")
-
-# CPU温度（vcgencmd が使えればそちらを優先）
+# CPU温度
 if command -v vcgencmd &>/dev/null; then
-  CPU_TEMP=$(vcgencmd measure_temp 2>/dev/null | grep -oP '[0-9.]+')
-elif [ -f /sys/class/thermal/thermal_zone0/temp ]; then
-  CPU_TEMP=$(awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp)
+  TEMP=$(vcgencmd measure_temp 2>/dev/null | grep -oP '[0-9.]+')
+elif [[ -f /sys/class/thermal/thermal_zone0/temp ]]; then
+  TEMP=$(awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp)
 else
-  CPU_TEMP="N/A"
+  TEMP="N/A"
 fi
-
-# 温度に応じて色を変える
-TEMP_COLOR="$GREEN"
-if [ "$CPU_TEMP" != "N/A" ]; then
-  if (( $(echo "$CPU_TEMP >= 75" | bc -l 2>/dev/null) )); then
-    TEMP_COLOR="$RED"
-  elif (( $(echo "$CPU_TEMP >= 60" | bc -l 2>/dev/null) )); then
-    TEMP_COLOR="$YELLOW"
-  fi
+# 85°C を 100% として割合を計算
+if [[ $TEMP != "N/A" ]]; then
+  TEMP_P=$(awk "BEGIN{printf \"%.0f\", ${TEMP%.*}*100/85}")
+else
+  TEMP_P=0
 fi
+TEMP_C=$GN
+(( TEMP_P >= 88 )) && TEMP_C=$RD || (( TEMP_P >= 70 )) && TEMP_C=$YL
 
-MEM_USED=$(free -m 2>/dev/null | awk 'NR==2{print $3}')
-MEM_TOTAL=$(free -m 2>/dev/null | awk 'NR==2{print $2}')
-MEM_PCT=$(free 2>/dev/null | awk 'NR==2{printf "%.0f", $3/$2*100}')
-[ -z "$MEM_USED" ] && MEM_USED="?" && MEM_TOTAL="?" && MEM_PCT="?"
+# メモリ
+MEM_U=$(free -m 2>/dev/null | awk 'NR==2{print $3}')
+MEM_T=$(free -m 2>/dev/null | awk 'NR==2{print $2}')
+MEM_P=$(free 2>/dev/null | awk 'NR==2{printf "%.0f", $3/$2*100}')
+MEM_C=$GN; (( MEM_P >= 80 )) && MEM_C=$RD || (( MEM_P >= 60 )) && MEM_C=$YL
 
-DISK_USED=$(df -h / 2>/dev/null | awk 'NR==2{print $3}')
-DISK_TOTAL=$(df -h / 2>/dev/null | awk 'NR==2{print $2}')
-DISK_PCT=$(df / 2>/dev/null | awk 'NR==2{print $5}')
-[ -z "$DISK_USED" ] && DISK_USED="?" && DISK_TOTAL="?" && DISK_PCT="?"
+# ディスク
+DSK_U=$(df -h / 2>/dev/null | awk 'NR==2{print $3}')
+DSK_T=$(df -h / 2>/dev/null | awk 'NR==2{print $2}')
+DSK_P=$(df / 2>/dev/null | awk 'NR==2{print $5}' | tr -d '%')
+DSK_C=$GN; (( DSK_P >= 80 )) && DSK_C=$RD || (( DSK_P >= 60 )) && DSK_C=$YL
 
-NOW=$(date '+%Y/%m/%d  %H:%M:%S')
+NOW=$(date '+%Y/%m/%d  %H:%M')
+LAST=$(last -1 -F "$USER" 2>/dev/null | awk 'NR==1{print $5,$6,$7,$8}')
 
-# ─── 描画関数 ─────────────────────────────────────────────────
-W=52  # ボックス内側幅
+W=56  # ボックス内側幅
 
-# ボックスの罫線
-top_border()    { printf "${BLUE}╔$(printf '═%.0s' $(seq 1 $W))╗${R}\n"; }
-mid_border()    { printf "${BLUE}╠$(printf '═%.0s' $(seq 1 $W))╣${R}\n"; }
-bottom_border() { printf "${BLUE}╚$(printf '═%.0s' $(seq 1 $W))╝${R}\n"; }
-blank_row()     { printf "${BLUE}║${R}$(printf ' %.0s' $(seq 1 $W))${BLUE}║${R}\n"; }
+# ─── 描画ヘルパー ─────────────────────────────────────────────
+TB() { printf "${BL}╔$(printf '═%.0s' $(seq 1 $W))╗${R}\n"; }
+MB() { printf "${BL}╠$(printf '═%.0s' $(seq 1 $W))╣${R}\n"; }
+BB() { printf "${BL}╚$(printf '═%.0s' $(seq 1 $W))╝${R}\n"; }
 
-# 中央寄せ行
-center_row() {
-  local text="$1"
-  local color="$2"
-  local len=${#text}
-  local left=$(( (W - len) / 2 ))
-  local right=$(( W - len - left ))
-  [ $left -lt 0 ] && left=0
-  [ $right -lt 0 ] && right=0
-  printf "${BLUE}║${R}%${left}s${color}%s${R}%${right}s${BLUE}║${R}\n" "" "$text" ""
+# 中央寄せ（ANSIなしのテキストを渡す）
+ctr() {
+  local txt="$1" col="${2:-}"
+  local l=$(( (W - ${#txt}) / 2 ))
+  local r=$(( W - ${#txt} - l ))
+  [[ $l -lt 0 ]] && l=0; [[ $r -lt 0 ]] && r=0
+  printf "${BL}║${R}%${l}s${col}%s${R}%${r}s${BL}║${R}\n" "" "$txt" ""
 }
 
-# ラベル＋値の行
-info_row() {
-  local label="$1"
-  local value_plain="$2"   # パディング計算用（エスケープなし）
-  local value_color="$3"   # 実際の表示（ANSIカラーあり）
-  local inner="  $label  $value_plain"
-  local len=${#inner}
-  local pad=$(( W - len ))
-  [ $pad -lt 0 ] && pad=0
-  printf "${BLUE}║${R}  ${GRAY}%s${R}  %s%${pad}s${BLUE}║${R}\n" "$label" "$value_color" ""
+# プログレスバー（BAR と BAR_PLAIN にセット）
+mkbar() {
+  local pct=$1 col=$2 w=22 b="" i
+  local f=$(( pct * w / 100 ))
+  local e=$(( w - f ))
+  [[ $f -lt 0 ]] && f=0; [[ $e -lt 0 ]] && e=0
+  [[ $f -gt $w ]] && f=$w; e=$(( w - f ))
+  for ((i=0;i<f;i++)); do b+="█"; done
+  for ((i=0;i<e;i++)); do b+="░"; done
+  BAR="${GR}[${col}${b}${GR}]${R}"
+  BAR_PLAIN="[${b}]"  # 幅 = w+2 文字
 }
 
-# ─── バナー出力（13行） ───────────────────────────────────────
+# ラベル＋バー行
+brow() {
+  local label="$1" val="$2" val_c="$3" pct="${4:-0}" bar_c="$5"
+  mkbar "$pct" "$bar_c"
+  local visible="  $label  $val  ${BAR_PLAIN}  ${pct}%"
+  local pad=$(( W - ${#visible} ))
+  [[ $pad -lt 0 ]] && pad=0
+  printf "${BL}║${R}  ${GR}%s${R}  ${val_c}%s${R}  %s  ${D}%s%%${R}%${pad}s${BL}║${R}\n" \
+    "$label" "$val" "$BAR" "$pct" ""
+}
+
+# 2カラム行
+trow() {
+  local k1="$1" v1="$2" c1="$3" k2="$4" v2="$5" c2="$6"
+  local lp="  $k1  $v1"
+  local rp="$k2  $v2  "
+  local gap=$(( W - ${#lp} - ${#rp} ))
+  [[ $gap -lt 1 ]] && gap=1
+  printf "${BL}║${R}  ${GR}%s${R}  ${c1}%s${R}%${gap}s${GR}%s${R}  ${c2}%s${R}  ${BL}║${R}\n" \
+    "$k1" "$v1" "" "$k2" "$v2"
+}
+
+# ─── 出力（13行） ─────────────────────────────────────────────
 echo
-top_border                                                                        # 1
-center_row "◆  D O T T O R E  ◆"               "${BOLD}${CYAN}"                 # 2
-center_row "Sistema di ricerca avviato"          "${DIM}${WHITE}"                # 3
-mid_border                                                                        # 4
-info_row   "HOST     :" "$HOST"                  "${BOLD}${WHITE}${HOST}${R}"    # 5
-info_row   "IP       :" "$IP"                    "${GREEN}${IP}${R}"             # 6
-info_row   "UPTIME   :" "$UPTIME"               "${WHITE}${UPTIME}${R}"          # 7
-info_row   "CPU TEMP :" "${CPU_TEMP}°C"          "${TEMP_COLOR}${CPU_TEMP}°C${R}"# 8
-info_row   "MEMORY   :" "${MEM_USED}MB/${MEM_TOTAL}MB (${MEM_PCT}%)" \
-                         "${WHITE}${MEM_USED}MB${R}${GRAY}/${R}${WHITE}${MEM_TOTAL}MB ${R}${DIM}(${MEM_PCT}%)${R}"  # 9
-info_row   "DISK     :" "${DISK_USED}/${DISK_TOTAL} (${DISK_PCT})" \
-                         "${WHITE}${DISK_USED}${R}${GRAY}/${R}${WHITE}${DISK_TOTAL} ${R}${DIM}(${DISK_PCT})${R}"   # 10
-info_row   "DATE     :" "$NOW"                   "${DIM}${NOW}${R}"              # 11
-bottom_border                                                                     # 12
-echo                                                                              # 13
+TB
+ctr "◆  D O T T O R E  ◆"           "${B}${CY}"
+ctr "Sistema  di  ricerca  avviato"  "${D}${WT}"
+MB
+trow "HOST"   "$HOST"   "${B}${WT}" "IP"     "$IP"   "${GN}"
+trow "UPTIME" "$UPTIME" "${WT}"     "DATE"   "$NOW"  "${D}${WT}"
+MB
+brow "CPU " "${TEMP}°C"              "$TEMP_C" "$TEMP_P" "$TEMP_C"
+brow "MEM " "${MEM_U}MB / ${MEM_T}MB" "$MEM_C" "$MEM_P"  "$MEM_C"
+brow "DISK" "${DSK_U} / ${DSK_T}"   "$DSK_C"  "$DSK_P"  "$DSK_C"
+MB
+if [[ -n $LAST ]]; then
+  ctr "Last login : $LAST" "${GR}"
+else
+  ctr "観察を開始する" "${GR}"
+fi
+BB
+echo
