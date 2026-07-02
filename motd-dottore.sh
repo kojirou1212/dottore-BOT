@@ -52,11 +52,12 @@ TB() { printf "${BL}╔$(printf '═%.0s' $(seq 1 $W))╗${R}\n"; }
 MB() { printf "${BL}╠$(printf '═%.0s' $(seq 1 $W))╣${R}\n"; }
 BB() { printf "${BL}╚$(printf '═%.0s' $(seq 1 $W))╝${R}\n"; }
 
-# 中央寄せ（ANSIなしのテキストを渡す）
+# 中央寄せ（キリル文字など多バイト文字対応: wc -m で文字数カウント）
 ctr() {
   local txt="$1" col="${2:-}"
-  local l=$(( (W - ${#txt}) / 2 ))
-  local r=$(( W - ${#txt} - l ))
+  local len; len=$(printf '%s' "$txt" | wc -m)
+  local l=$(( (W - len) / 2 ))
+  local r=$(( W - len - l ))
   [[ $l -lt 0 ]] && l=0; [[ $r -lt 0 ]] && r=0
   printf "${BL}║${R}%${l}s${col}%s${R}%${r}s${BL}║${R}\n" "" "$txt" ""
 }
