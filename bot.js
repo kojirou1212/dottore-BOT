@@ -637,6 +637,7 @@ async function doFatigueLeave() {
   returningUserGreeted.clear();
   currentVCChannel = null;
   sessionStartTime = null;
+  await vcHandler.playLeaveSound().catch(() => {});
   vcHandler.leave();
   clearVCState();
   console.log("[Bot] 疲労退出完了");
@@ -936,6 +937,7 @@ async function autoRejoinVC() {
       const now = Date.now();
       channel.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
       scheduleLongStayCheck();
+      vcHandler.playJoinSound().catch(() => {});
       console.log(`[Bot] VC自動再参加完了: ${channel.name}`);
     } else {
       console.warn("[Bot] VC自動再参加失敗（権限または接続エラー）");
@@ -1245,7 +1247,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     // 一人（Bot以外いない）→ 5秒後に退出
     if (aloneTimer) return; // すでにタイマー起動中
     console.log("[Bot] VC内が無人になりました。5秒後に退出します。");
-    aloneTimer = setTimeout(() => {
+    aloneTimer = setTimeout(async () => {
       aloneTimer = null;
       if (!vcHandler.isConnected()) return;
       // 退出前に再確認
@@ -1269,6 +1271,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         notifyText("……観察終了、記録した。退出する。");
         currentVCChannel = null;
         sessionStartTime = null;
+        await vcHandler.playLeaveSound().catch(() => {});
         vcHandler.leave();
         clearVCState();
         console.log("[Bot] 無人のため自動退出しました。");
@@ -1416,6 +1419,7 @@ client.on("messageCreate", async (message) => {
       targetVC.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
       scheduleLongStayCheck();
       saveVCState(message.guild.id, targetVC.id);
+      vcHandler.playJoinSound().catch(() => {});
       await message.reply(`……参加する。「${targetVC.name}」の監視を開始する。声も聴いている。終わるなら \`!owari\` だ。`);
     } else {
       await message.reply("……VC参加に失敗した。権限を確認しろ。");
@@ -1578,7 +1582,10 @@ client.on("messageCreate", async (message) => {
       currentVCChannel = null;
       sessionStartTime = null;
       listenCallback = null;
-      if (vcHandler.isConnected()) vcHandler.leave();
+      if (vcHandler.isConnected()) {
+        await vcHandler.playLeaveSound().catch(() => {});
+        vcHandler.leave();
+      }
       clearVCState();
       await message.reply("……退出する。観察記録は保存した。");
       return;

@@ -92,8 +92,6 @@ const SOUND_BOARD = [
   { name: "やられ",                   file: "ぐあああああッ！！！(やられ).mp3",   tags: ["やられ", "敗北", "ダメージ", "絶叫"] },
   { name: "ぐおおおおっ（被ダメ２）", file: "ぐおおおおおっ…！！(被ダメ２).mp3", tags: ["叫び", "ダメージ", "驚愕", "怒り"] },
   { name: "ぐおおっ（被ダメ１）",     file: "ぐおおおっ！！(被ダメ１).mp3",      tags: ["叫び", "ダメージ", "衝撃"] },
-  { name: "ごきげんよう",             file: "ごきげんよう。.mp3",                 tags: ["挨拶", "上機嫌", "余裕", "去り際"] },
-  { name: "さようならと言わなくては", file: "さようならと言わなくては.mp3",       tags: ["別れ", "去り際", "皮肉", "余裕"] },
   { name: "耐える声",                 file: "ぬあああああああっ…！！(耐え).mp3",  tags: ["耐える", "苦しい", "我慢", "痛み"] },
   { name: "溜息",                     file: "はぁ…(溜息).mp3",                   tags: ["ため息", "呆れ", "疲れ", "落胆"] },
   { name: "笑い声1",                  file: "はっはっはっは….mp3",               tags: ["笑", "高笑い", "嘲笑", "面白い"] },
@@ -107,7 +105,13 @@ const SOUND_BOARD = [
   { name: "動くな。",                 file: "動くな。.mp3",                      tags: ["制止", "命令", "威圧", "止まれ"] },
   { name: "おっと、これは褒め言葉ではないぞ？",                 file: "おっと、これは褒め言葉ではないぞ？.mp3",                      tags: ["呆れ", "軽蔑", "興味なし", "余裕"] },
   { name: "ここの看板メニューを食べないのか？",                 file: "ここの看板メニューを食べないのか？.mp3",                      tags: ["空腹", "興味", "提案", "余裕"] },
-  { name: "無音",                                               file: "無音.mp3",                                                    tags: ["無音", "沈黙", "無反応", "間"] },
+  { name: "そうかもしれないな",        file: "そうかもしれないな.mp3",            tags: ["同意", "曖昧", "考える", "余裕"] },
+  { name: "そうだな",                  file: "そうだな.mp3",                      tags: ["同意", "肯定", "落ち着き", "余裕"] },
+  { name: "そう思うか",                file: "そう思うか.mp3",                    tags: ["疑問", "考える", "聞き返し", "興味"] },
+  { name: "なるほど",                  file: "なるほど.mp3",                      tags: ["納得", "興味", "なるほど", "反応"] },
+  { name: "ふっ",                      file: "ふっ.mp3",                          tags: ["笑", "鼻で笑う", "軽蔑", "余裕"] },
+  { name: "安心するといい",            file: "安心するといい.mp3",                tags: ["安心", "余裕", "上から目線", "慰め"] },
+  { name: "無音",                      file: "無音.mp3",                          tags: ["無音", "沈黙", "無反応", "間"] },
 ];
 
 // ── ファジー正規化 ─────────────────────────────────────────────────────────
@@ -157,6 +161,17 @@ function checkSoundFiles() {
   }
   console.log(`[VCHandler] ファイル確認: ${okCount}件OK / ${ngCount}件NG`);
 }
+
+// ── VC入室・退出専用サウンド ─────────────────────────────────────────────
+const VC_JOIN_SOUNDS = [
+  { name: "ごきげんよう（入室）",         file: "start_ごきげんよう。.mp3" },
+  { name: "ひさしぶりだな（入室）",       file: "start_ひさしぶりだな.mp3" },
+];
+
+const VC_LEAVE_SOUNDS = [
+  { name: "さようならと言わなくては（退出）", file: "end_さようならと言わなくては.mp3" },
+  { name: "終了だ（退出）",                   file: "end_終了だ.mp3" },
+];
 
 checkSoundFiles();
 
@@ -435,6 +450,19 @@ ${soundList}
       console.error("[VCHandler] 再生エラー:", err.message);
       return false;
     }
+  }
+
+  // ── VC入室・退出サウンド ─────────────────────────────────────────────────
+  async playJoinSound() {
+    const entry = VC_JOIN_SOUNDS[Math.floor(Math.random() * VC_JOIN_SOUNDS.length)];
+    console.log(`[VCHandler] 入室サウンド: ${entry.name}`);
+    return this.playSound(entry);
+  }
+
+  async playLeaveSound() {
+    const entry = VC_LEAVE_SOUNDS[Math.floor(Math.random() * VC_LEAVE_SOUNDS.length)];
+    console.log(`[VCHandler] 退出サウンド: ${entry.name}`);
+    return this.playSound(entry);
   }
 
   // ── メッセージに応じて音声を選択して再生（統合メソッド）─────────────────
