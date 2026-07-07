@@ -474,7 +474,7 @@ ${soundList}
 
   // ── メッセージに応じて音声を選択して再生（統合メソッド）─────────────────
   async respondToMessage(userMessage) {
-    const { sounds, thought } = this.selectSoundLocal(userMessage);
+    const { sounds, thought } = await this.selectSound(userMessage);
     const results = [];
     for (const sound of sounds) {
       if (!sound) continue;
