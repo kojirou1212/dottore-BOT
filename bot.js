@@ -635,9 +635,9 @@ async function doFatigueLeave() {
   userJoinTimes.clear();
   sessionLeavers.clear();
   returningUserGreeted.clear();
+  await vcHandler.playLeaveSound().catch(() => {});
   currentVCChannel = null;
   sessionStartTime = null;
-  await vcHandler.playLeaveSound().catch(() => {});
   vcHandler.leave();
   clearVCState();
   console.log("[Bot] 疲労退出完了");
@@ -1269,9 +1269,14 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         sessionLeavers.clear();
         // テキストチャンネルに通知（チャンネル判定のためcurrentVCChannelクリア前に送る）
         notifyText("……観察終了、記録した。退出する。");
+        await vcHandler.playLeaveSound().catch(() => {});
+        // サウンド再生中に入室した場合は退出キャンセル
+        if (ch?.members.filter((m) => !m.user.bot).size !== 0) {
+          console.log("[Bot] 退出キャンセル（サウンド再生中に入室）");
+          return;
+        }
         currentVCChannel = null;
         sessionStartTime = null;
-        await vcHandler.playLeaveSound().catch(() => {});
         vcHandler.leave();
         clearVCState();
         console.log("[Bot] 無人のため自動退出しました。");

@@ -147,7 +147,8 @@ function checkSoundFiles() {
   let okCount = 0;
   let ngCount = 0;
 
-  for (const entry of SOUND_BOARD) {
+  const allEntries = [...SOUND_BOARD, ...VC_JOIN_SOUNDS, ...VC_LEAVE_SOUNDS];
+  for (const entry of allEntries) {
     const matched = findActualFile(entry.file, actualFiles);
     if (matched) {
       if (matched !== entry.file) {
@@ -456,13 +457,19 @@ ${soundList}
   async playJoinSound() {
     const entry = VC_JOIN_SOUNDS[Math.floor(Math.random() * VC_JOIN_SOUNDS.length)];
     console.log(`[VCHandler] 入室サウンド: ${entry.name}`);
-    return this.playSound(entry);
+    return Promise.race([
+      this.playSound(entry),
+      new Promise((r) => setTimeout(() => r(false), 10000)),
+    ]);
   }
 
   async playLeaveSound() {
     const entry = VC_LEAVE_SOUNDS[Math.floor(Math.random() * VC_LEAVE_SOUNDS.length)];
     console.log(`[VCHandler] 退出サウンド: ${entry.name}`);
-    return this.playSound(entry);
+    return Promise.race([
+      this.playSound(entry),
+      new Promise((r) => setTimeout(() => r(false), 10000)),
+    ]);
   }
 
   // ── メッセージに応じて音声を選択して再生（統合メソッド）─────────────────
