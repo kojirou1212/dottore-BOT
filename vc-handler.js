@@ -171,7 +171,6 @@ const VC_JOIN_SOUNDS = [
 
 const VC_LEAVE_SOUNDS = [
   { name: "さようならと言わなくては（退出）", file: "end_さようならと言わなくては.mp3" },
-  { name: "終了だ（退出）",                   file: "end_終了だ.mp3" },
 ];
 
 checkSoundFiles();

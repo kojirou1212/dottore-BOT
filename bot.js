@@ -1177,6 +1177,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
           freshCh.members.forEach((m) => { if (!m.user.bot) userJoinTimes.set(m.id, now); });
           scheduleLongStayCheck();
           saveVCState(newState.guild.id, freshCh.id);
+          vcHandler.playJoinSound().catch(() => {});
           notifyText(pick("vc_autojoin") || "……気が向いた。観察を開始する。");
           console.log(`[Bot] 自動参加: ${freshCh.name}`);
         }, waitMs);
