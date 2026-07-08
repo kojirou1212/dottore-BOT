@@ -404,6 +404,7 @@ let fatigueTimer = null;      // 疲労退出タイマー
 let dailyMood = null;         // ④⑤ 日替わり機嫌 'good'|'neutral'|'bad'
 let isFocused = false;        // ① 集中モード中フラグ
 let focusTimer = null;        // ① 集中モードタイマー
+let isKiiteMode = false;      // !kiite：スキップレートをほぼゼロにする
 const recentSpeakers = new Map(); // ② 連続発言追跡 userId→{count, lastTime}
 const userJoinTimes = new Map();  // ⑥ 長居追跡 userId→joinTimestamp
 let longStayTimer = null;     // ⑥ 長居チェック定期タイマー
@@ -435,25 +436,26 @@ function resetDailyMood() {
 
 // ②④⑤ スキップ率（疲労・人数・時間帯・機嫌を合算）
 function getSkipRate(humanCount) {
-  let base = 0.15;
+  if (isKiiteMode) return 0.02; // !kiiteモード：ほぼ全発言に反応
+  let base = 0.05;
   if (sessionStartTime) {
     const min = (Date.now() - sessionStartTime) / 60000;
-    if (min >= 240) base = 0.28;      // 4時間以上：常連として馴染み、少し戻る
-    else if (min >= 90) base = 0.40;
-    else if (min >= 60) base = 0.35;
-    else if (min >= 30) base = 0.25;
+    if (min >= 240) base = 0.12;      // 4時間以上：常連として馴染み、少し戻る
+    else if (min >= 90) base = 0.20;
+    else if (min >= 60) base = 0.15;
+    else if (min >= 30) base = 0.10;
   }
   // 大人数ほど応答しなくなる
   const count = humanCount ?? 1;
-  if (count >= 5) base = Math.min(base + 0.30, 0.80);
-  else if (count >= 3) base = Math.min(base + 0.15, 0.65);
+  if (count >= 5) base = Math.min(base + 0.20, 0.60);
+  else if (count >= 3) base = Math.min(base + 0.08, 0.40);
   // 時間帯補正（深夜は機嫌良い・反応増、朝は機嫌悪い・反応減）
   const hour = getJSTHour();
-  if (hour >= 23 || hour < 2) base = Math.max(base - 0.10, 0.05);
-  else if (hour >= 6 && hour < 10) base = Math.min(base + 0.10, 0.85);
+  if (hour >= 23 || hour < 2) base = Math.max(base - 0.05, 0.02);
+  else if (hour >= 6 && hour < 10) base = Math.min(base + 0.08, 0.70);
   // 日替わり機嫌補正
-  if (dailyMood === "good") base = Math.max(base - 0.08, 0.05);
-  else if (dailyMood === "bad") base = Math.min(base + 0.08, 0.85);
+  if (dailyMood === "good") base = Math.max(base - 0.05, 0.02);
+  else if (dailyMood === "bad") base = Math.min(base + 0.05, 0.70);
   return base;
 }
 
@@ -1357,12 +1359,24 @@ client.on("messageCreate", async (message) => {
     content === "!hakase" ||
     content.startsWith("!hakase ") ||
     content === "!owari" ||
-    content === "!status";
+    content === "!status" ||
+    content === "!kiite";
 
   const isProfileCommand = content === "!profile" || content.startsWith("!profile ");
 
   if (BOT_MODE === "text" && isVCCommand) return;
   if (BOT_MODE === "vc" && !isVCCommand && !isProfileCommand) return;
+
+  // ── !kiite ────────────────────────────────────────────────────
+  if (content === "!kiite") {
+    isKiiteMode = !isKiiteMode;
+    if (isKiiteMode) {
+      await message.reply("……わかった。全部聴いてやる。");
+    } else {
+      await message.reply("……もういいだろう。通常に戻す。");
+    }
+    return;
+  }
 
   // ── !kanshi ───────────────────────────────────────────────────
   if (content === "!kanshi" || content.startsWith("!kanshi ")) {
