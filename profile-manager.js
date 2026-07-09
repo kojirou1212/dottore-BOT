@@ -269,10 +269,18 @@ class ProfileManager {
       ? `ドットーレによる人物評価：「${p.botRecord.observation}」`
       : "";
 
-    if (parts.length === 0 && !ageNote && !weaknessHint && !observationHint) return "";
+    // 馴染み度に応じた「予測通りの対応を試す」実験的態度のヒント（優しさではなく観察行為として）
+    const count = p.botRecord.messageCount;
+    const familiarityHint = count >= 300
+      ? `この被検体は長期にわたり観測してきた対象だ（発言${count}回）。ごく稀に、要求通りの言葉・行動をあえてそのまま返し、相手の反応を観察する「予測通りの対応をした場合どうなるか」という実験を行ってよい。迎合ではなく観察者としての選択として扱うこと。頻発させず、通常は従来通り拒否・はぐらかしを基本とする。`
+      : count >= 100
+      ? `ある程度観測データが蓄積された被検体だ（発言${count}回）。ごく稀に、要求通りの対応を試験的に返し反応を見てもよい。基本は従来通り拒否・はぐらかしを優先する。`
+      : "";
+
+    if (parts.length === 0 && !ageNote && !weaknessHint && !observationHint && !familiarityHint) return "";
 
     const baseHint = parts.length > 0 ? `【この被検体の記録】${parts.join("、")}。` : "";
-    return [baseHint, observationHint, ageNote, weaknessHint].filter(Boolean).join("\n");
+    return [baseHint, observationHint, ageNote, weaknessHint, familiarityHint].filter(Boolean).join("\n");
   }
 }
 
