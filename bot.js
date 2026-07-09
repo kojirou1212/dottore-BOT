@@ -497,6 +497,15 @@ function isSurvivalMessage(text) {
   return SURVIVAL_KEYWORDS.some((kw) => text.includes(kw));
 }
 
+// 観測回数マイルストーン到達時のセリフ（profileManager.checkMilestone と対応）
+const MILESTONE_LINES = {
+  50:   "……観測回数、50に達したか。悪くないデータ量だ。",
+  150:  "……150回か。……そろそろお前のパターンが見えてきた。",
+  300:  "……300。……随分と付き合いが長くなったものだな。",
+  500:  "……500、か。……ここまで来ると、単なる被検体では片付けられなくなる。",
+  1000: "……1000。……お前は私の記録の中でも、稀な部類に入る。",
+};
+
 // 鼻歌判定：延音符を含み、内容語を持たない音のみの文字列
 // 例: "んーーー" "ふ〜ふ〜" "らら〜" "〜〜〜"
 function isHummingTranscript(text) {
@@ -1353,6 +1362,12 @@ client.on("messageCreate", async (message) => {
   // プロフィール更新（コマンド含む全メッセージでカウント・最終観測更新）
   profileManager.onMessage(userId, userTag);
 
+  // 観測回数マイルストーン到達通知
+  const reachedMilestone = profileManager.checkMilestone(userId);
+  if (reachedMilestone && MILESTONE_LINES[reachedMilestone]) {
+    message.channel.send(MILESTONE_LINES[reachedMilestone]).catch(() => {});
+  }
+
   const isVCCommand =
     content === "!kanshi" ||
     content.startsWith("!kanshi ") ||
@@ -1789,10 +1804,12 @@ client.on("messageCreate", async (message) => {
 
   } catch (error) {
     console.error(`[Bot] エラー [${userTag}]:`, error.message);
+    const isTimeout = error.name === "AbortError";
+    const replyText = isTimeout ? "…聞こえなかった。もう一度" : config.ai.errorMessage;
     try {
-      await message.reply(config.ai.errorMessage);
+      await message.reply(replyText);
     } catch (_) {
-      await message.channel.send(config.ai.errorMessage).catch(() => {});
+      await message.channel.send(replyText).catch(() => {});
     }
     client.channels.fetch("1510458726405116086").then((ch) => {
       if (ch) ch.send(`[エラー] ${userTag}\n\`\`\`\n${error.stack ?? error.message}\n\`\`\``).catch(() => {});

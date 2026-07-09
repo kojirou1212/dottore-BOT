@@ -38,8 +38,8 @@ class MemoryManager {
   addMemory(userId, text) {
     if (!this.data[userId]) this.data[userId] = { entries: [] };
     this.data[userId].entries.push({ text: text.trim(), timestamp: Date.now() });
-    if (this.data[userId].entries.length > 30) {
-      this.data[userId].entries = this.data[userId].entries.slice(-30);
+    if (this.data[userId].entries.length > 40) {
+      this.data[userId].entries = this.data[userId].entries.slice(-40);
     }
     this.save();
   }
@@ -71,7 +71,10 @@ class MemoryManager {
     }).join("\n");
   }
 
-  // ２週目の水曜日（＝前回リフレッシュから7日以上経過した水曜日）にリフレッシュ
+  // 毎週水曜日に古い記憶を間引く（保持期間は RETENTION_DAYS）
+  // 週1回長期記憶を刈り取る一方、1ヶ月分の関係性は失われないようにする
+  static RETENTION_DAYS = 30;
+
   checkAndRefresh() {
     const jst = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     if (jst.getDay() !== 3) return false; // 水曜日のみ
@@ -83,13 +86,13 @@ class MemoryManager {
       if (daysSince < 7) return false;
     }
 
-    // 7日以上前のエントリーを削除
-    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    // RETENTION_DAYS より古いエントリーを削除
+    const cutoff = Date.now() - MemoryManager.RETENTION_DAYS * 24 * 60 * 60 * 1000;
     let cleared = 0;
     for (const [userId, userData] of Object.entries(this.data)) {
       if (userId === "_meta") continue;
       const before = userData.entries.length;
-      userData.entries = userData.entries.filter(e => e.timestamp > oneWeekAgo);
+      userData.entries = userData.entries.filter(e => e.timestamp > cutoff);
       cleared += before - userData.entries.length;
     }
 

@@ -32,6 +32,21 @@ const EMPTY_USER_FIELDS = () => ({
   symptom: null, tendency: null, weakness: null, memo: null,
 });
 
+// 観測回数のマイルストーン（到達時に一度だけ特別なセリフを返す）
+const MILESTONES = [50, 150, 300, 500, 1000];
+
+// 馴染み度ラベル（観測回数に応じた段階表示）
+const FAMILIARITY_TIERS = [
+  { min: 300, label: "長期観察対象（データ蓄積は稀な域）" },
+  { min: 100, label: "馴染みのある被検体" },
+  { min: 20,  label: "継続観察中" },
+  { min: 0,   label: "初期観察段階" },
+];
+
+function familiarityLabel(messageCount) {
+  return FAMILIARITY_TIERS.find(t => messageCount >= t.min).label;
+}
+
 class ProfileManager {
   constructor() {
     this.profiles = {};
@@ -52,6 +67,9 @@ class ProfileManager {
           // 新キーが未定義なら補完
           for (const key of Object.keys(EMPTY_USER_FIELDS())) {
             if (!(key in p.userFields)) p.userFields[key] = null;
+          }
+          if (!Array.isArray(p.botRecord?.milestonesReached)) {
+            p.botRecord.milestonesReached = [];
           }
         }
         console.log(`[Profiles] ${Object.keys(this.profiles).length}件読み込み完了`);
@@ -83,6 +101,7 @@ class ProfileManager {
           negativeCount: 0,
           survivalCount: 0,
           observation: null,
+          milestonesReached: [],
         },
       };
     }
@@ -96,6 +115,31 @@ class ProfileManager {
     p.botRecord.lastSeen = new Date().toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
     p.botRecord.messageCount++;
     this.save();
+  }
+
+  // 観測回数が新たなマイルストーンを超えていれば、その値を返す（一度きり）
+  checkMilestone(userId) {
+    const p = this.profiles[userId];
+    if (!p) return null;
+    const count = p.botRecord.messageCount;
+    const reached = p.botRecord.milestonesReached ?? (p.botRecord.milestonesReached = []);
+    for (const m of MILESTONES) {
+      if (count >= m && !reached.includes(m)) {
+        reached.push(m);
+        this.save();
+        return m;
+      }
+    }
+    return null;
+  }
+
+  // 初観測からの経過日数
+  getTenureDays(userId) {
+    const p = this.profiles[userId];
+    if (!p) return 0;
+    const first = new Date(p.botRecord.firstSeen);
+    const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+    return Math.max(0, Math.floor((now - first) / (1000 * 60 * 60 * 24)));
   }
 
   onNegative(userId) {
@@ -167,6 +211,8 @@ class ProfileManager {
 
     lines.push("\n【観察記録（ドットーレ記入）】");
     lines.push(`観測回数: ${p.botRecord.messageCount}回`);
+    lines.push(`継続日数: ${this.getTenureDays(userId)}日`);
+    lines.push(`馴染み度: ${familiarityLabel(p.botRecord.messageCount)}`);
     lines.push(`ネガティブ反応: ${p.botRecord.negativeCount > 0 ? `${p.botRecord.negativeCount}回検知` : "なし"}`);
     lines.push(`心配発言: ${p.botRecord.survivalCount > 0 ? `${p.botRecord.survivalCount}回検知` : "なし"}`);
     lines.push(`人物評価: ${p.botRecord.observation ?? "……まだ観察データが不足している。"}`);
