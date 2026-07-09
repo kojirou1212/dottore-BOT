@@ -69,7 +69,10 @@ class ProfileManager {
             if (!(key in p.userFields)) p.userFields[key] = null;
           }
           if (!Array.isArray(p.botRecord?.milestonesReached)) {
-            p.botRecord.milestonesReached = [];
+            // 移行時点で既に超えているマイルストーンは「既読」扱いにし、
+            // 遡って連続発火しないようにする
+            const count = p.botRecord?.messageCount ?? 0;
+            p.botRecord.milestonesReached = MILESTONES.filter(m => count >= m);
           }
         }
         console.log(`[Profiles] ${Object.keys(this.profiles).length}件読み込み完了`);
@@ -118,19 +121,18 @@ class ProfileManager {
   }
 
   // 観測回数が新たなマイルストーンを超えていれば、その値を返す（一度きり）
+  // 1回のチェックで複数のマイルストーンを同時に跨いだ場合（データ移行時のズレ等）は
+  // 連続発火させず、黙って既読扱いにするだけに留める（自己修復）
   checkMilestone(userId) {
     const p = this.profiles[userId];
     if (!p) return null;
     const count = p.botRecord.messageCount;
     const reached = p.botRecord.milestonesReached ?? (p.botRecord.milestonesReached = []);
-    for (const m of MILESTONES) {
-      if (count >= m && !reached.includes(m)) {
-        reached.push(m);
-        this.save();
-        return m;
-      }
-    }
-    return null;
+    const newlyCrossed = MILESTONES.filter(m => count >= m && !reached.includes(m));
+    if (newlyCrossed.length === 0) return null;
+    reached.push(...newlyCrossed);
+    this.save();
+    return newlyCrossed.length === 1 ? newlyCrossed[0] : null;
   }
 
   // 初観測からの経過日数
