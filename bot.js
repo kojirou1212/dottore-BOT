@@ -1084,7 +1084,91 @@ function startTimedMutter() {
   }, 60 * 1000);
 }
 
+// ─── テキストチャンネルの自発発言（試験的機能・明示的にfeatures.textMutter=trueの時のみ）───
+function startTextMutter() {
+  if (BOT_MODE === "vc") return;
+  if (config.features?.textMutter !== true) return;
+  console.log("[Bot] テキストmutter機能起動（試験的）");
 
+  setInterval(async () => {
+    if (Math.random() > 0.10) return; // 発動確率を抑える（45分間隔 × 10%）
+    const topicsHint = getRecentTopicsHint();
+    if (!topicsHint) return;
+
+    const prompt =
+      `${topicsHint}\n\n` +
+      `ドットーレ（冷静・傲慢・知的な研究者）として、上記の最近の会話の流れに割り込むように自発的に一言コメントせよ。` +
+      `誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構わない。1〜2文、80文字程度。` +
+      `行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力。`;
+
+    try {
+      const text = await aiHandler.generateSimple(prompt, 120);
+      const targetCh = zatsuChannelId || [...targetChannelIds][0];
+      if (!text || !targetCh) return;
+      const ch = await client.channels.fetch(targetCh).catch(() => null);
+      if (ch && ch.isTextBased()) {
+        await ch.send(text);
+        console.log(`[Bot] テキストmutter発動: ${text.slice(0, 60)}`);
+      }
+    } catch (err) {
+      console.error("[Bot] テキストmutterエラー:", err.message);
+    }
+  }, 45 * 60 * 1000);
+}
+
+// ─── フォローアップ（記憶に基づく自発言及・試験的機能）────────────────────
+// 直近で活動があり、記憶データを持つ被検体を対象に、ごく稀に自発的に言及する
+let lastFollowUpTime = 0;
+const followUpCooldowns = new Map(); // userId → 最終フォローアップ時刻
+
+function startFollowUp() {
+  if (BOT_MODE === "vc") return;
+  if (config.features?.followUp !== true) return;
+  console.log("[Bot] フォローアップ機能起動（試験的）");
+
+  setInterval(async () => {
+    if (Math.random() > 0.10) return; // 発動確率を抑える（60分間隔 × 10%）
+    if (Date.now() - lastFollowUpTime < 4 * 60 * 60 * 1000) return; // 全体クールダウン：4時間
+
+    const now = Date.now();
+    const eligible = Object.entries(profileManager.profiles).filter(([userId, p]) => {
+      const memories = memoryManager.getMemories(userId);
+      if (memories.length === 0) return false;
+      const lastSeen = p.botRecord?.lastSeen;
+      if (!lastSeen) return false;
+      const daysSinceSeen = (now - new Date(lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceSeen > 3) return false; // 直近3日以内に活動があった相手のみ
+      const lastFollowUp = followUpCooldowns.get(userId) ?? 0;
+      return now - lastFollowUp > 3 * 24 * 60 * 60 * 1000; // 同一人物への再言及は3日以上空ける
+    });
+    if (eligible.length === 0) return;
+
+    const [userId] = eligible[Math.floor(Math.random() * eligible.length)];
+    const memories = memoryManager.getMemories(userId);
+    const memoryText = memories[Math.floor(Math.random() * memories.length)].text;
+
+    const prompt =
+      `以下は被検体についてドットーレが記録していた記憶データの一つだ。「${memoryText}」\n\n` +
+      `ドットーレ（冷静・傲慢・知的な研究者）として、ふと思い出したかのようにこの件へ触れ、被検体へ向けて一言言及せよ。` +
+      `催促や心配ではなく、観察・経過確認のニュアンスで。1〜2文、80文字程度。感情語は使わないこと。` +
+      `前置き・説明不要、セリフ本文のみ出力。`;
+
+    try {
+      const text = await aiHandler.generateSimple(prompt, 120);
+      const targetCh = zatsuChannelId || [...targetChannelIds][0];
+      if (!text || !targetCh) return;
+      const ch = await client.channels.fetch(targetCh).catch(() => null);
+      if (ch && ch.isTextBased()) {
+        await ch.send(`<@${userId}> ${text}`);
+        lastFollowUpTime = now;
+        followUpCooldowns.set(userId, now);
+        console.log(`[Bot] フォローアップ発動 [${userId}]: ${text.slice(0, 60)}`);
+      }
+    } catch (err) {
+      console.error("[Bot] フォローアップエラー:", err.message);
+    }
+  }, 60 * 60 * 1000);
+}
 
 // ─── 起動バナー ───────────────────────────────────────────────────────────
 function printStartupBanner(tag, mood) {
@@ -1152,6 +1236,8 @@ client.once("clientReady", async () => {
   printStartupBanner(client.user.tag, dailyMood);
   startScheduler();
   startTimedMutter();
+  startTextMutter();
+  startFollowUp();
   await autoRejoinVC();
 });
 
