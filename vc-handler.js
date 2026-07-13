@@ -187,7 +187,10 @@ class VCHandler {
     this._transcriptCallback = null;
     this._speakingHandler = null;
     this._lastResponseTime = 0;
-    this._cooldownMs = config.ai?.listenCooldownMs ?? 30000;
+    // 応答後のクールダウンをランダム化する（最大値は従来の固定値のまま、最小値はその40%）
+    this._cooldownMaxMs = config.ai?.listenCooldownMs ?? 30000;
+    this._cooldownMinMs = config.ai?.listenCooldownMinMs ?? Math.round(this._cooldownMaxMs * 0.4);
+    this._currentCooldownMs = this._cooldownMaxMs;
     this._userLastSttTime = new Map(); // userId -> 最終STT時刻（ユーザーごとのレート制限）
     this._userSttCooldownMs = config.ai?.sttUserCooldownMs ?? 20000;
     this._preFilter = null; // (userId) => boolean — true なら STT スキップ
@@ -524,7 +527,7 @@ ${soundList}
     this._speakingHandler = (userId) => {
       if (this.isPlaying || this._recentlyPlayed) return;
       if (this._activeStreams.size > 0) return;
-      if (Date.now() - this._lastResponseTime < this._cooldownMs) return;
+      if (Date.now() - this._lastResponseTime < this._currentCooldownMs) return;
       if (!this._transcriptCallback) return;
       if (this._preFilter && this._preFilter(userId)) return; // 集中モード・無視中をSTT前に排除
       const userLastStt = this._userLastSttTime.get(userId) || 0;
@@ -588,6 +591,8 @@ ${soundList}
         } finally {
           this._activeStreams.delete(userId);
           this._lastResponseTime = Date.now(); // SILENT 含め常にリセット（バースト防止）
+          // 次回のクールダウンをランダムに再抽選（最小〜最大の範囲）
+          this._currentCooldownMs = this._cooldownMinMs + Math.random() * (this._cooldownMaxMs - this._cooldownMinMs);
           this._userLastSttTime.set(userId, Date.now());
         }
       });
