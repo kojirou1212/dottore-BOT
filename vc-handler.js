@@ -644,7 +644,12 @@ ${soundList}
     const bodyJson = JSON.stringify({
       contents: [{
         parts: [
-          { text: "この音声を日本語でそのまま文字起こしして。音声がない場合はSILENTとだけ返して。" },
+          {
+            text:
+              "この音声を日本語でそのまま文字起こしして。話されている言葉だけをプレーンテキストで出力すること。" +
+              "タイムスタンプ（00:00 のような時刻表記）や字幕・SRT形式は絶対に含めないこと。" +
+              "音声がない、または雑音・無音しかない場合はSILENTとだけ返して。",
+          },
           { inline_data: { mime_type: "audio/wav", data: wavBuffer.toString("base64") } },
         ],
       }],
@@ -684,9 +689,13 @@ ${soundList}
         throw lastError;
       }
 
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!text || text.toUpperCase() === "SILENT") return null;
-      return text;
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!rawText || rawText.toUpperCase() === "SILENT") return null;
+
+      // Geminiがまれに実際の発話の代わりにタイムスタンプ（00:00 等）を幻覚として返すため除去
+      const cleaned = rawText.replace(/\d{1,2}:\d{2}(:\d{2})?/g, "").replace(/\s+/g, " ").trim();
+      if (!cleaned) return null; // タイムスタンプのみだった場合はSILENT扱い
+      return cleaned;
     }
     throw lastError;
   }
