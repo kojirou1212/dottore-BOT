@@ -257,6 +257,41 @@ async function extractAndStoreMemory(userId, userMessage, aiReply) {
   }
 }
 
+// ─── 矛盾検知（記憶と新しい発言を照合、確率・クールダウン付き）──────────────
+const contradictionCooldowns = new Map(); // userId → 最終チェック時刻
+
+async function checkContradiction(userId, newMessage) {
+  if (config.features?.contradictionCheck === false) return null;
+
+  const COOLDOWN_MS = 10 * 60 * 1000;
+  const now = Date.now();
+  if ((contradictionCooldowns.get(userId) ?? 0) + COOLDOWN_MS > now) return null;
+
+  const memories = [...memoryManager.getMemories(userId), ...memoryManager.getSavedMemories(userId)];
+  if (memories.length < 3) return null;
+  if (Math.random() > 0.3) return null; // 発動確率を抑える
+
+  contradictionCooldowns.set(userId, now);
+
+  const memoryText = memories.slice(-15).map(e => `・${e.text}`).join("\n");
+  const prompt =
+    `以下は被検体についてこれまでに記録された事実だ。\n${memoryText}\n\n` +
+    `被検体の新しい発言：「${newMessage.slice(0, 200)}」\n\n` +
+    `この新しい発言は、上記の記録内容と明確に矛盾しているか？矛盾している場合のみ、その矛盾点を1文で簡潔に述べよ` +
+    `（例：「以前は猫を飼っていないと言っていたはずだが」）。矛盾していない、または判断できない場合は「なし」とだけ出力せよ。`;
+
+  try {
+    const result = await aiHandler.generateSimple(prompt, 100);
+    if (result && result.trim() !== "なし" && result.length < 150) {
+      return result.trim();
+    }
+  } catch (err) {
+    console.error("[Bot] 矛盾検知エラー:", err.message);
+    contradictionCooldowns.delete(userId);
+  }
+  return null;
+}
+
 // ─── プロフィールチャンネル投稿処理 ─────────────────────────────────────────
 // プロフィールテンプレートのフィールドを解析してprofileManagerに反映
 function parseProfileTemplate(content) {
@@ -1042,6 +1077,11 @@ function startScheduler() {
       }
     }
 
+    // ── 月次記念日メッセージ（初観測日から○ヶ月の節目、13時にチェック）──
+    if (hour === 13 && config.features?.anniversary !== false) {
+      checkAnniversaries().catch(err => console.error("[Scheduler] 記念日チェックエラー:", err.message));
+    }
+
     if (config.features?.jihou === false) return;
     if (!(hour in scheduleMap)) return;
     const listName = scheduleMap[hour];
@@ -1059,6 +1099,44 @@ function startScheduler() {
       }
     }
   }, 60 * 1000);
+}
+
+// ─── 月次記念日メッセージ（初観測日からの月数の節目に、そっと触れる）───────
+async function checkAnniversaries() {
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const todayDate = now.getDate();
+
+  for (const [userId, p] of Object.entries(profileManager.profiles)) {
+    const firstSeenStr = p.botRecord?.firstSeen;
+    if (!firstSeenStr) continue;
+    const first = new Date(firstSeenStr);
+    if (isNaN(first.getTime())) continue;
+    if (first.getDate() !== todayDate) continue; // 「初観測日」と同じ日付の日のみ
+
+    const monthsSince = (now.getFullYear() - first.getFullYear()) * 12 + (now.getMonth() - first.getMonth());
+    if (monthsSince < 1) continue; // 初日そのものは除外
+
+    await sendAnniversaryMessage(userId, monthsSince).catch(err =>
+      console.error(`[Bot] 記念日メッセージエラー [${userId}]:`, err.message)
+    );
+  }
+}
+
+async function sendAnniversaryMessage(userId, months) {
+  const prompt =
+    `今日は被検体の初観測から${months}ヶ月の節目にあたる日だ。` +
+    `ドットーレ（冷静・傲慢・知的な研究者。記念日そのものには興味がないと公言している）として、` +
+    `記念日には興味がないという態度は崩さないまま、なぜかその日付だけはさりげなく覚えていた、というニュアンスで一言触れよ。` +
+    `1〜2文、80文字程度。前置き不要、セリフ本文のみ出力。`;
+
+  const text = await aiHandler.generateSimple(prompt, 120);
+  const targetCh = zatsuChannelId || [...targetChannelIds][0];
+  if (!text || !targetCh) return;
+  const ch = await client.channels.fetch(targetCh).catch(() => null);
+  if (ch && ch.isTextBased()) {
+    await ch.send(`<@${userId}> ${text}`);
+    console.log(`[Bot] 記念日メッセージ送信 [${userId}]: ${months}ヶ月`);
+  }
 }
 
 // ─── 特定時刻の独り言（テキスト）─────────────────────────────────────────
@@ -1681,6 +1759,56 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
+  // ── !oboete（明示的な記録・自動抽出とは別枠）───────────────────────
+  if (content === "!oboete" || content.startsWith("!oboete ")) {
+    const args = content.slice("!oboete".length).trim();
+
+    if (args === "list") {
+      const display = memoryManager.formatSavedForDisplay(userId);
+      await message.reply(display ? `……明示的に記録した事項。\n\n${display}` : "……まだ何も記録していない。");
+      return;
+    }
+
+    if (args === "clear") {
+      const ok = memoryManager.clearSavedMemories(userId);
+      await message.reply(ok ? "……記録をすべて消去した。" : "……記録がない。");
+      return;
+    }
+
+    if (args) {
+      // 直接テキストを指定 → そのまま保存
+      memoryManager.addSavedMemory(userId, args);
+      await message.reply(`……記録した。「${args}」`);
+      return;
+    }
+
+    // 引数なし：直近の会話を要約して保存
+    const history = aiHandler.getHistory(userId);
+    if (history.length === 0) {
+      await message.reply("……まだ会話がない。記録するものがない。");
+      return;
+    }
+    if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
+    const recentHistory = history.slice(-16);
+    const historyText = recentHistory
+      .map(h => `${h.role === "user" ? "被検体" : "ドットーレ"}: ${h.content}`)
+      .join("\n");
+    const prompt =
+      `以下は被検体との直近の会話履歴だ。\n\n${historyText}\n\n` +
+      `この内容から、後で参照する価値のある情報を要約せよ。` +
+      `出力形式：2〜4文程度。会話の要点・被検体について明らかになった事実や文脈を簡潔にまとめること。` +
+      `前置き・ドットーレの台詞は不要、要約内容のみ出力。`;
+    try {
+      const summary = await aiHandler.generateSimple(prompt, 200);
+      memoryManager.addSavedMemory(userId, summary);
+      await message.reply(`……記録した。\n\n${summary}`);
+    } catch (err) {
+      console.error("[Bot] !oboete エラー:", err.message);
+      await message.reply("……記録に失敗した。");
+    }
+    return;
+  }
+
 
   // ── コマンド ─────────────────────────────────────────────────
   switch (content) {
@@ -1805,7 +1933,11 @@ client.on("messageCreate", async (message) => {
         "!profile set 備考 [内容]        … 備考を記入\n" +
         "!nani                           … 雑談チャンネルの観察記録を表示\n" +
         "!base                           … 自分の基本情報を表示\n" +
-        "!memory                         … 自分の記憶メモを表示\n" +
+        "!memory                         … 自分の記憶メモを表示（自動抽出分）\n" +
+        "!oboete                         … 直近の会話を要約して明示的に記録\n" +
+        "!oboete [内容]                  … 指定した内容をそのまま記録\n" +
+        "!oboete list                    … 明示的に記録した内容を表示\n" +
+        "!oboete clear                   … 明示的に記録した内容を消去\n" +
         "!kanshi [VC名]                  … VCに召喚\n" +
         "!hakase [msg]                   … VCで音声再生\n" +
         "!owari                          … VCから退出\n" +
@@ -1847,6 +1979,7 @@ client.on("messageCreate", async (message) => {
     const loreHint = knowledgeBase.getLoreContextHint();
     const userBaseHint = knowledgeBase.getUserBaseHint(userId);
     const memoryHint = memoryManager.formatForContext(userId);
+    const savedMemoryHint = memoryManager.formatSavedForContext(userId);
     const topicsHint = getRecentTopicsHint();
     const userSpecificHint = userHints[userId] ?? null;
     const timeHint = getTimeBasedMoodHint();
@@ -1860,7 +1993,15 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, userSpecificHint, sentimentHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
+    const contradiction = await checkContradiction(userId, content).catch(() => null);
+    const contradictionHint = contradiction
+      ? `被検体の今回の発言は、過去の記録と矛盾している可能性がある：「${contradiction}」。今回の返答では、この矛盾を研究者らしく鋭く指摘すること。責めるのではなく、興味深い観察対象を見つけたという態度で。`
+      : null;
+    if (contradiction) {
+      message.react("👀").catch(() => {});
+    }
+
+    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, content, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {

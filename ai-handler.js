@@ -93,7 +93,7 @@ class AIHandler {
     const url = "https://api.x.ai/v1/chat/completions";
     const chatHistory = history.slice(0, -1);
 
-    const callGrok = async (model) => {
+    const callGrok = async (model, isRetry = false) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
       let res;
@@ -132,6 +132,10 @@ class AIHandler {
         const finishReason = data.choices?.[0]?.finish_reason ?? "UNKNOWN";
         console.warn(`[AIHandler] 空応答 finish_reason=${finishReason}`);
         if (finishReason === "content_filter") return "……(その話題には応答できない)";
+        if (!isRetry) {
+          console.warn("[AIHandler] 空応答のため1回だけ聞き直す");
+          return callGrok(model, true);
+        }
         throw new Error(`AIからの応答が空でした。(finish_reason=${finishReason})`);
       }
 
