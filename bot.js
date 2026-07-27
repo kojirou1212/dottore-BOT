@@ -149,6 +149,10 @@ const loreChannelIds = new Set(
   (config.discord.loreChannelId || "")
     .split(",").map(s => s.trim()).filter(Boolean)
 );
+const artChannelIds = new Set(
+  (config.discord.artChannelId || "")
+    .split(",").map(s => s.trim()).filter(Boolean)
+);
 const vcNotifyChannelId = config.discord.vcNotifyChannelId || [...new Set(config.discord.targetChannelIds)][0];
 const zatsuChannelId = config.discord.zatsuChannelId || "";
 const debugChannelId = config.discord.debugChannelId || "";
@@ -421,6 +425,36 @@ async function handleLoreCommand(message) {
     await message.reply(`……「${args}」というカテゴリは存在しない。`);
   } else {
     await message.reply(`【${args}】\n${entry.content}\n（更新: ${entry.updatedAt}）`);
+  }
+}
+
+// ─── イラスト投稿チャンネル処理 ─────────────────────────────────────────────
+// 画像投稿にのみ短いコメントを返す。雑談・会話履歴の扱いはしない
+async function handleArtPost(message) {
+  const imageAttachments = [...message.attachments.values()].filter(a => a.contentType?.startsWith("image/"));
+  if (imageAttachments.length === 0) return; // テキストのみの投稿は無視
+
+  const att = imageAttachments[0];
+  if (att.size > 10 * 1024 * 1024) return;
+
+  try {
+    const imgRes = await fetch(att.url);
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    const description = await aiHandler.describeImage(buffer, att.contentType);
+    if (!description) return;
+
+    const prompt =
+      `以下は被検体が投稿したイラストの説明だ。\n「${description}」\n\n` +
+      `ドットーレ（冷静・傲慢・知的な研究者）として、このイラストに対する短い感想・観察コメントを1つ生成せよ。` +
+      `1〜2文、60文字程度。行動描写（括弧書き）を使ってもよい。前置き不要、セリフ本文のみ出力。`;
+
+    const comment = await aiHandler.generateSimple(prompt, 100);
+    if (comment) {
+      await message.reply(comment);
+      console.log(`[Bot] イラストコメント送信 [${message.author.tag}]: ${comment.slice(0, 60)}`);
+    }
+  } catch (err) {
+    console.error(`[Bot] イラスト認識エラー [${message.author.tag}]:`, err.message);
   }
 }
 
@@ -1491,6 +1525,9 @@ client.on("messageCreate", async (message) => {
   const isLoreCh = loreChannelIds.size > 0
     && loreChannelIds.has(message.channelId)
     && !isTarget;
+  const isArtCh = artChannelIds.size > 0
+    && artChannelIds.has(message.channelId)
+    && !isTarget;
 
   // プロフィールチャンネル：ユーザー基本情報を保管
   if (isProfileCh) {
@@ -1506,6 +1543,12 @@ client.on("messageCreate", async (message) => {
       if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
       await handleLoreCommand(message);
     }
+    return;
+  }
+
+  // イラスト投稿チャンネル：画像投稿にのみ短いコメントを返す（雑談扱いはしない）
+  if (isArtCh) {
+    await handleArtPost(message);
     return;
   }
 
