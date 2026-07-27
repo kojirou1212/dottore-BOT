@@ -179,6 +179,111 @@ Railway の `restartPolicyType = "always"` により、終了後に自動で再�
 
 ---
 
+---
+
+# X (Twitter) Bot（ドットーレ Twitter版）
+
+Discord版と同じGrok(xAI) APIでキャラクターとしての文章を生成し、X（旧Twitter）に投稿する追加コンポーネントです。`twitter-bot.js` / `twitter-handler.js` として独立したpm2プロセスで動作します。
+
+## 前提・注意事項
+
+- **X APIは2026年2月に無料枠が廃止され、従量課金制**になっています（投稿$0.015/件、読み取り$0.005/件、目安で月数ドル程度）。支払い方法の登録が必須です。
+- **鍵垢（非公開アカウント）にする設定はAPIではなくXのアカウント設定側**で行います（下記手順4）。APIキー自体に鍵垢/公開の区別はありません。
+- 現状はリプライの送信者がフォロワーかどうかに関わらず、メンションされたら反応します。鍵垢運用なら実質フォロワー以外は絡んでこない想定ですが、絞りたい場合は今後 `getMentions` 側でフォロー関係を確認する処理を追加できます。
+
+## セットアップ手順
+
+### 1. X (Twitter) アカウントの用意
+Botとして動かす用のXアカウントを作成（または既存アカウントを利用）してください。
+
+### 2. Developer Portalでアプリを作成
+1. https://developer.x.com/ にアクセスし、Bot用アカウントでログインして開発者登録
+2. 「Projects & Apps」から新しいAppを作成
+3. App の **User authentication settings** で以下を設定
+   - App permissions: **Read and Write**（リプライ・投稿に必須）
+   - Type of App: Web App / Native App など任意（OAuth1.0aのKey/Secret発行が目的）
+4. **Keys and tokens** タブで以下を発行・控える
+   - API Key / API Key Secret
+   - Access Token / Access Token Secret
+   - ⚠️ **Read and Write に権限変更した後は、Access Token/Secretを再発行**しないと権限が反映されず投稿がエラーになります
+
+### 3. 支払い方法の登録
+Developer Portalの請求設定から支払い方法を登録してください（従量課金のため必須）。
+
+### 4. アカウントを鍵垢に設定
+X本体の「設定 → プライバシーと安全 → 投稿を非公開にする」をON（Bot用アカウントにログインして手動設定）。
+
+### 5. twitter-config.json の作成
+プロジェクト直下の `twitter-config.json` に取得したキーを設定してください（雛形は作成済み）。
+
+```json
+{
+  "twitter": {
+    "appKey": "YOUR_TWITTER_API_KEY",
+    "appSecret": "YOUR_TWITTER_API_KEY_SECRET",
+    "accessToken": "YOUR_TWITTER_ACCESS_TOKEN",
+    "accessSecret": "YOUR_TWITTER_ACCESS_TOKEN_SECRET"
+  },
+  "grok": {
+    "apiKey": "xai-YOUR_XAI_API_KEY",
+    "model": "grok-3",
+    "fallbackModel": "grok-3-mini",
+    "maxTokens": 300,
+    "maxHistoryLength": 10
+  },
+  "ai": {
+    "systemPromptFile": "system-prompt.txt",
+    "errorMessage": "……エラーだ。少し待て。"
+  },
+  "schedule": {
+    "hours": [9, 12, 15, 18, 21, 0],
+    "maxTweetLength": 280
+  },
+  "mentions": {
+    "enabled": true,
+    "pollIntervalMs": 300000,
+    "stateFile": "twitter-state.json"
+  }
+}
+```
+
+| キー | 説明 |
+|------|------|
+| `twitter.*` | X Developer Portalで取得したOAuth1.0aキー一式 |
+| `grok.*` | Discord版と同じくGrok(xAI)の設定。既存の`config.json`のキーを流用可 |
+| `ai.systemPromptFile` | キャラクター設定（既存の`system-prompt.txt`をそのまま使用） |
+| `schedule.hours` | 定時つぶやきを行う時刻（JST・0〜23の配列） |
+| `schedule.maxTweetLength` | 1投稿の最大文字数（Xの標準上限は280） |
+| `mentions.enabled` | メンションへの自動リプライのON/OFF |
+| `mentions.pollIntervalMs` | メンション確認の間隔（ミリ秒）。読み取り課金を抑えるため頻度を上げすぎないこと |
+| `mentions.stateFile` | 最終処理済みメンションIDなどを保存する状態ファイル |
+
+### 6. 依存パッケージのインストール
+```bash
+npm install
+```
+（`twitter-api-v2` は追加済み）
+
+### 7. 起動
+単体起動:
+```bash
+node twitter-bot.js
+```
+
+pm2で他Botと合わせて起動（`ecosystem.config.js`に`dottore-twitter`として登録済み）:
+```bash
+pm2 start ecosystem.config.js
+pm2 logs dottore-twitter
+```
+
+## 機能
+
+- **定時つぶやき**: `schedule.hours`で指定した時刻(JST)に、Grokがキャラクターの独り言として新規ツイートを生成・投稿
+- **メンションへの自動リプライ**: 一定間隔でメンションを確認し、`since_id`による差分取得（読み取り課金の抑制）でリプライ生成・返信
+- ユーザーごとの直近の会話履歴はDiscord版と同様プロセス内メモリで保持（プロセス再起動でリセット）
+
+---
+
 ## 環境変数（Railway等）
 
 | 変数名 | 説明 |

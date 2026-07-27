@@ -19,6 +19,15 @@ module.exports = {
       },
       restart_delay: 5000,
       max_restarts: 10
+    },
+    {
+      name: "dottore-twitter",
+      script: "twitter-bot.js",
+      env: {
+        CONFIG_PATH: "twitter-config.json"
+      },
+      restart_delay: 5000,
+      max_restarts: 10
     }
   ]
 };
