@@ -2008,16 +2008,17 @@ client.on("messageCreate", async (message) => {
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
 
-    // 画像添付の認識（最初の1枚のみ、Geminiで説明文を生成してヒントに変換）
-    let imageHint = null;
+    // 画像添付の認識（最初の1枚のみ、Geminiで説明文を生成）
+    // 説明文はsystemHintではなく発言内容そのものに埋め込み、会話履歴に永続させる。
+    // これにより後続の写真・発言で「さっきの〜」と自然に参照できる（連続写真の文脈継続）。
+    let imageDescription = null;
     if (imageAttachments.length > 0) {
       const att = imageAttachments[0];
       if (att.size <= 10 * 1024 * 1024) {
         try {
           const imgRes = await fetch(att.url);
           const buffer = Buffer.from(await imgRes.arrayBuffer());
-          const description = await aiHandler.describeImage(buffer, att.contentType);
-          if (description) imageHint = `【被検体が画像を添付した。その内容】\n${description}`;
+          imageDescription = await aiHandler.describeImage(buffer, att.contentType);
         } catch (err) {
           console.error(`[Bot] 画像処理エラー [${userTag}]:`, err.message);
         }
@@ -2025,7 +2026,9 @@ client.on("messageCreate", async (message) => {
         console.warn(`[Bot] 画像サイズ超過のためスキップ [${userTag}]: ${att.size}bytes`);
       }
     }
-    const effectiveContent = content || (imageHint ? "（画像を送信した）" : content);
+    const effectiveContent = imageDescription
+      ? (content ? `${content}\n【添付画像の内容】${imageDescription}` : `【添付画像の内容】${imageDescription}`)
+      : content;
 
     const survival = isSurvivalMessage(content);
     const negative = !survival && isNegativeMessage(content);
@@ -2065,7 +2068,7 @@ client.on("messageCreate", async (message) => {
       message.react("👀").catch(() => {});
     }
 
-    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, imageHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
+    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
