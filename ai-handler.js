@@ -210,6 +210,47 @@ class AIHandler {
       return text;
     }, 1);
   }
+
+  // 画像添付の内容をGeminiで説明文に変換（Grok自体は画像を見ないため、テキスト経由で渡す）
+  async describeImage(imageBuffer, mimeType) {
+    const apiKey = this.config.gemini?.apiKey;
+    if (!apiKey) {
+      console.warn("[AIHandler] Gemini APIキー未設定のため画像認識をスキップ");
+      return null;
+    }
+    const model = this.config.gemini.visionModel || this.config.gemini.sttModel || "gemini-2.5-flash-lite";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: "この画像を日本語で客観的に説明して。写っているもの・状況・雰囲気を簡潔に2〜4文程度で述べること。" },
+              { inline_data: { mime_type: mimeType, data: imageBuffer.toString("base64") } },
+            ],
+          }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("[AIHandler] 画像認識エラー:", data.error?.message ?? res.statusText);
+        return null;
+      }
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      return text || null;
+    } catch (err) {
+      console.error("[AIHandler] 画像認識エラー:", err.message);
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 module.exports = AIHandler;

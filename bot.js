@@ -1518,7 +1518,8 @@ client.on("messageCreate", async (message) => {
   const userId = message.author.id;
   const userTag = message.author.tag;
   const content = message.content.trim();
-  if (!content) return;
+  const imageAttachments = [...message.attachments.values()].filter(a => a.contentType?.startsWith("image/"));
+  if (!content && imageAttachments.length === 0) return;
 
   // 久しぶりユーザー検知（onMessage でlastSeenが上書きされる前に取得）
   const prevLastSeen = profileManager.profiles[userId]?.botRecord?.lastSeen ?? null;
@@ -1963,6 +1964,26 @@ client.on("messageCreate", async (message) => {
 
   try {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
+
+    // 画像添付の認識（最初の1枚のみ、Geminiで説明文を生成してヒントに変換）
+    let imageHint = null;
+    if (imageAttachments.length > 0) {
+      const att = imageAttachments[0];
+      if (att.size <= 10 * 1024 * 1024) {
+        try {
+          const imgRes = await fetch(att.url);
+          const buffer = Buffer.from(await imgRes.arrayBuffer());
+          const description = await aiHandler.describeImage(buffer, att.contentType);
+          if (description) imageHint = `【被検体が画像を添付した。その内容】\n${description}`;
+        } catch (err) {
+          console.error(`[Bot] 画像処理エラー [${userTag}]:`, err.message);
+        }
+      } else {
+        console.warn(`[Bot] 画像サイズ超過のためスキップ [${userTag}]: ${att.size}bytes`);
+      }
+    }
+    const effectiveContent = content || (imageHint ? "（画像を送信した）" : content);
+
     const survival = isSurvivalMessage(content);
     const negative = !survival && isNegativeMessage(content);
     if (survival) { console.log(`[Bot] 生存願望発言検知 [${userTag}]`); profileManager.onSurvival(userId); }
@@ -1993,7 +2014,7 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    const contradiction = await checkContradiction(userId, content).catch(() => null);
+    const contradiction = await checkContradiction(userId, effectiveContent).catch(() => null);
     const contradictionHint = contradiction
       ? `被検体の今回の発言は、過去の記録と矛盾している可能性がある：「${contradiction}」。今回の返答では、この矛盾を研究者らしく鋭く指摘すること。責めるのではなく、興味深い観察対象を見つけたという態度で。`
       : null;
@@ -2001,8 +2022,8 @@ client.on("messageCreate", async (message) => {
       message.react("👀").catch(() => {});
     }
 
-    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
-    const reply = await aiHandler.generateResponse(userId, content, { systemHint });
+    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, imageHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
+    const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
       try {
@@ -2021,12 +2042,12 @@ client.on("messageCreate", async (message) => {
     // 観察メモ更新（5会話ごと or ネガティブ/生存イベント時）
     const msgCount = profileManager.profiles[userId]?.botRecord?.messageCount ?? 0;
     if (negative || survival || msgCount % 5 === 0) {
-      updateObservation(userId, content, reply).catch(() => {});
+      updateObservation(userId, effectiveContent, reply).catch(() => {});
     }
 
     // 記憶抽出（3会話ごと）
     if (msgCount % 3 === 0) {
-      extractAndStoreMemory(userId, content, reply).catch(() => {});
+      extractAndStoreMemory(userId, effectiveContent, reply).catch(() => {});
     }
 
   } catch (error) {
