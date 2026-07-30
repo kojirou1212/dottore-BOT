@@ -101,7 +101,6 @@ class ProfileManager {
           firstSeen: now,
           lastSeen: now,
           messageCount: 0,
-          negativeCount: 0,
           survivalCount: 0,
           observation: null,
           milestonesReached: [],
@@ -142,11 +141,6 @@ class ProfileManager {
     const first = new Date(p.botRecord.firstSeen);
     const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     return Math.max(0, Math.floor((now - first) / (1000 * 60 * 60 * 24)));
-  }
-
-  onNegative(userId) {
-    const p = this.profiles[userId];
-    if (p) { p.botRecord.negativeCount++; this.save(); }
   }
 
   onSurvival(userId) {
@@ -215,7 +209,6 @@ class ProfileManager {
     lines.push(`観測回数: ${p.botRecord.messageCount}回`);
     lines.push(`継続日数: ${this.getTenureDays(userId)}日`);
     lines.push(`馴染み度: ${familiarityLabel(p.botRecord.messageCount)}`);
-    lines.push(`ネガティブ反応: ${p.botRecord.negativeCount > 0 ? `${p.botRecord.negativeCount}回検知` : "なし"}`);
     lines.push(`心配発言: ${p.botRecord.survivalCount > 0 ? `${p.botRecord.survivalCount}回検知` : "なし"}`);
     lines.push(`人物評価: ${p.botRecord.observation ?? "……まだ観察データが不足している。"}`);
 
@@ -247,9 +240,6 @@ class ProfileManager {
     if (p.userFields.symptom)  parts.push(`申告症状・状態「${p.userFields.symptom}」`);
     if (p.userFields.tendency) parts.push(`行動傾向「${p.userFields.tendency}」`);
     if (p.userFields.memo)     parts.push(`備考「${p.userFields.memo}」`);
-    if (p.botRecord.negativeCount > 0) {
-      parts.push(`過去にネガティブ反応${p.botRecord.negativeCount}回観測済み`);
-    }
     if (p.botRecord.survivalCount > 0) {
       parts.push(`ドットーレの生存を心配する発言${p.botRecord.survivalCount}回観測済み`);
     }

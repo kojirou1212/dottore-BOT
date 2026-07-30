@@ -531,29 +531,6 @@ function getSkipRate(humanCount) {
 // ③ キーワード（名前を呼ばれたら必ず反応）
 const TRIGGER_KEYWORDS = ["ドットーレ", "博士", "ハカセ", "dottore"];
 
-// ネガティブ発言の検知キーワード
-const NEGATIVE_KEYWORDS = [
-  "つらい", "辛い", "つらくて", "辛くて", "つらすぎ", "辛すぎ",
-  "しんどい", "しんどくて", "しんどすぎ",
-  "きつい", "きつくて", "きつすぎ",
-  "苦しい", "苦しくて",
-  "悲しい", "悲しくて", "かなしい",
-  "寂しい", "寂しくて", "さみしい",
-  "怖い", "怖くて", "こわい",
-  "不安", "落ち込", "凹んだ", "凹んでる", "へこんだ", "へこんでる",
-  "憂鬱", "ゆううつ", "絶望",
-  "疲れた", "つかれた", "くたくた", "ぐったり",
-  "もう無理", "もうだめ", "もうダメ", "もう限界", "限界",
-  "死にたい", "消えたい", "いなくなりたい",
-  "泣いてる", "泣きたい", "泣いた", "泣いちゃった",
-  "最悪", "嫌になった", "嫌になってる",
-  "ダメだ", "だめだ", "自分が嫌",
-];
-
-function isNegativeMessage(text) {
-  return NEGATIVE_KEYWORDS.some((kw) => text.includes(kw));
-}
-
 // ドットーレの生存を願う・心配する発言の検知
 const SURVIVAL_KEYWORDS = [
   "生きろ", "生きて", "生きてほしい", "生きてください", "生きてくれ",
@@ -2031,16 +2008,12 @@ client.on("messageCreate", async (message) => {
       : content;
 
     const survival = isSurvivalMessage(content);
-    const negative = !survival && isNegativeMessage(content);
     if (survival) { console.log(`[Bot] 生存願望発言検知 [${userTag}]`); profileManager.onSurvival(userId); }
-    if (negative) { console.log(`[Bot] ネガティブ発言検知 [${userTag}]`); profileManager.onNegative(userId); }
 
     const profileHint = profileManager.getContextHint(userId);
 
     const sentimentHint = survival
       ? "この人物はドットーレの消滅・死・不在を恐れ、存続を強く望んでいる。今回の返答では、感情的な保証は不要。研究者の論理として「実験が途中だ」「観察対象がいなくなれば観察が終わる、それは認められない」「消える理由が今のところ存在しない」という形で存在の継続を示すこと。「心配するな」「大丈夫だ」は使わない。「まだ観察は終わっていない」「お前が心配するような状況にはない、今のところ」「私が消える前にすることがある」など、論理的・実務的な表現で確かな存在感を示すこと。完全に安心させず、観察対象として繋ぎ止める余白を残すこと。"
-      : negative
-      ? "対象の状態が観察適正範囲を外れつつある。今回の返答では、不安定・消耗・混乱といった状態変化を研究者として認識・記録する立場から応答すること。「心配」「かわいそう」「大丈夫」などの感情語は一切使わない。代わりに「誤差が大きくなっている」「状態が最適範囲を外れた」「今は余計な負荷をかけるな」「私の管理下で安定させろ」など、観察・管理・最適化の言語で対応すること。突き放さず、ただ確実にそこにいる研究者として「お前の状態は把握している」という事実を静かに示すこと。完全に安心させず、ただ管理下にいることを確認させる余白を残すこと。"
       : null;
 
     const loreHint = knowledgeBase.getLoreContextHint();
@@ -2085,9 +2058,9 @@ client.on("messageCreate", async (message) => {
     }
     console.log(`[Bot] 返答送信完了 [${userTag}]`);
 
-    // 観察メモ更新（5会話ごと or ネガティブ/生存イベント時）
+    // 観察メモ更新（5会話ごと or 生存イベント時）
     const msgCount = profileManager.profiles[userId]?.botRecord?.messageCount ?? 0;
-    if (negative || survival || msgCount % 5 === 0) {
+    if (survival || msgCount % 5 === 0) {
       updateObservation(userId, effectiveContent, reply).catch(() => {});
     }
 
