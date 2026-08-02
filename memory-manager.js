@@ -2,7 +2,9 @@
 const fs = require("fs");
 const path = require("path");
 
-const MEMORIES_PATH = path.join(__dirname, "user-memories.json");
+const MEMORIES_PATH = process.env.MEMORIES_FILE
+  ? path.resolve(__dirname, process.env.MEMORIES_FILE)
+  : path.join(__dirname, "user-memories.json");
 
 class MemoryManager {
   constructor() {

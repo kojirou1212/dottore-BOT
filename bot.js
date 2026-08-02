@@ -69,12 +69,20 @@ if (!config.gemini?.apiKey) {
   console.warn("[Bot] Gemini API キーが未設定です。VC音声認識（STT）は無効になります。");
 }
 
+// ─── キャラクター名（Grok指示文・表示テキストの補間に使用） ────────────────
+// 注意：定時挨拶・独り言・記念日・フォローアップ等の補助生成プロンプトは
+// 「（冷静・傲慢・知的な研究者）」等ドットーレ固有の人格描写を含んだまま。
+// 別キャラでこれらのfeaturesを有効化する際は、当該プロンプト文面も要見直し。
+const CHARACTER_NAME = config.character?.name || "ドットーレ";
+
 // ─── 動作モード ────────────────────────────────────────────────────────────
 const BOT_MODE = (process.env.BOT_MODE || "all").trim();
 console.log(`[Bot] 動作モード: ${BOT_MODE}`);
 
 // ─── メッセージリストの読み込み ───────────────────────────────────────────
-const MESSAGES_PATH = path.join(__dirname, "messages.json");
+const MESSAGES_PATH = process.env.MESSAGES_FILE
+  ? path.resolve(__dirname, process.env.MESSAGES_FILE)
+  : path.join(__dirname, "messages.json");
 let messageLists = {};
 let scheduleMap = {};
 
@@ -125,11 +133,13 @@ const client = new Client({
 
 const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
-const profileManager = new ProfileManager();
+const profileManager = new ProfileManager(CHARACTER_NAME);
 const knowledgeBase = new KnowledgeBase();
 const memoryManager = new MemoryManager();
 
-const USER_HINTS_PATH = path.join(__dirname, "user-hints.json");
+const USER_HINTS_PATH = process.env.USER_HINTS_FILE
+  ? path.resolve(__dirname, process.env.USER_HINTS_FILE)
+  : path.join(__dirname, "user-hints.json");
 let userHints = {};
 try {
   if (fs.existsSync(USER_HINTS_PATH)) {
@@ -216,8 +226,8 @@ async function updateObservation(userId, userMessage, aiReply) {
     `以下は研究対象との最新のやりとりだ。このデータをもとに被検体の人物像・行動傾向・特性に関する観察記録を更新せよ。\n\n` +
     `現在の記録：「${existing}」\n` +
     `被検体の発言：「${userMessage.slice(0, 300)}」\n` +
-    `（参考）ドットーレの返答：「${aiReply.slice(0, 150)}」\n\n` +
-    `出力形式：1〜2文の観察メモのみ出力すること（説明・前置き・ドットーレの台詞は不要）。` +
+    `（参考）${CHARACTER_NAME}の返答：「${aiReply.slice(0, 150)}」\n\n` +
+    `出力形式：1〜2文の観察メモのみ出力すること（説明・前置き・${CHARACTER_NAME}の台詞は不要）。` +
     `研究者視点で淡々と記述、感情語・主観的評価禁止。` +
     `観察可能な事実・傾向・パターンのみ（例：「深夜に出現する傾向がある」「自己否定的な発言が多い」「感情表現を避ける傾向が見られる」）。` +
     `既存記録がある場合は統合・要約してよい。`;
@@ -445,7 +455,7 @@ async function handleArtPost(message) {
 
     const prompt =
       `以下は被検体が投稿したイラストの説明だ。\n「${description}」\n\n` +
-      `ドットーレ（冷静・傲慢・知的な研究者）として、このイラストに対する短い感想・観察コメントを1つ生成せよ。` +
+      `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、このイラストに対する短い感想・観察コメントを1つ生成せよ。` +
       `1〜2文、60文字程度。行動描写（括弧書き）を使ってもよい。前置き不要、セリフ本文のみ出力。`;
 
     const comment = await aiHandler.generateSimple(prompt, 100);
@@ -653,10 +663,10 @@ function getTimeBasedMoodHint() {
   if (config.features?.deepNightMood === false) return null;
   const hour = getJSTHour();
   if (hour >= 2 && hour < 4) {
-    return "現在深夜2〜4時。ドットーレは睡眠不足で機嫌が極めて悪い。返答は1〜2語の最小限に。「寝ろ」「うるさい」「後にしろ」程度で構わない。";
+    return `現在深夜2〜4時。${CHARACTER_NAME}は睡眠不足で機嫌が極めて悪い。返答は1〜2語の最小限に。「寝ろ」「うるさい」「後にしろ」程度で構わない。`;
   }
   if (hour >= 5 && hour < 7) {
-    return "現在早朝5〜7時。ドットーレは機嫌が悪く、返答は短く素っ気ない。ただし、これは単なる挨拶や雑談を追い払う理由にはならない。「用がないなら去れ」のように単なる挨拶を拒絶するのは行き過ぎだ。素っ気なさは口数と温度の問題であり、相手を拒絶することではない。";
+    return `現在早朝5〜7時。${CHARACTER_NAME}は機嫌が悪く、返答は短く素っ気ない。ただし、これは単なる挨拶や雑談を追い払う理由にはならない。「用がないなら去れ」のように単なる挨拶を拒絶するのは行き過ぎだ。素っ気なさは口数と温度の問題であり、相手を拒絶することではない。`;
   }
   return null;
 }
@@ -1064,7 +1074,7 @@ function startScheduler() {
         const topicsHint = getRecentTopicsHint();
         const dateStr = `${now.getMonth() + 1}月${now.getDate()}日`;
         const prompt =
-          `今日は${dateStr}の朝${hour}時だ。ドットーレ（冷静・傲慢・知的な研究者）として、被検体たちへの朝の挨拶メッセージを1つ生成せよ。\n\n` +
+          `今日は${dateStr}の朝${hour}時だ。${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、被検体たちへの朝の挨拶メッセージを1つ生成せよ。\n\n` +
           `制約：\n` +
           `・必ず「おはよう、被検体。」で始めること\n` +
           `・2〜3文、100〜150文字程度\n` +
@@ -1136,7 +1146,7 @@ async function checkAnniversaries() {
 async function sendAnniversaryMessage(userId, months) {
   const prompt =
     `今日は被検体の初観測から${months}ヶ月の節目にあたる日だ。` +
-    `ドットーレ（冷静・傲慢・知的な研究者。記念日そのものには興味がないと公言している）として、` +
+    `${CHARACTER_NAME}（冷静・傲慢・知的な研究者。記念日そのものには興味がないと公言している）として、` +
     `記念日には興味がないという態度は崩さないまま、なぜかその日付だけはさりげなく覚えていた、というニュアンスで一言触れよ。` +
     `1〜2文、80文字程度。前置き不要、セリフ本文のみ出力。`;
 
@@ -1186,7 +1196,7 @@ function startTextMutter() {
 
     const prompt =
       `${topicsHint}\n\n` +
-      `ドットーレ（冷静・傲慢・知的な研究者）として、上記の最近の会話の流れに割り込むように自発的に一言コメントせよ。` +
+      `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、上記の最近の会話の流れに割り込むように自発的に一言コメントせよ。` +
       `誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構わない。1〜2文、80文字程度。` +
       `行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力。`;
 
@@ -1237,8 +1247,8 @@ function startFollowUp() {
     const memoryText = memories[Math.floor(Math.random() * memories.length)].text;
 
     const prompt =
-      `以下は被検体についてドットーレが記録していた記憶データの一つだ。「${memoryText}」\n\n` +
-      `ドットーレ（冷静・傲慢・知的な研究者）として、ふと思い出したかのようにこの件へ触れ、被検体へ向けて一言言及せよ。` +
+      `以下は被検体について${CHARACTER_NAME}が記録していた記憶データの一つだ。「${memoryText}」\n\n` +
+      `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、ふと思い出したかのようにこの件へ触れ、被検体へ向けて一言言及せよ。` +
       `催促や心配ではなく、観察・経過確認のニュアンスで。1〜2文、80文字程度。感情語は使わないこと。` +
       `前置き・説明不要、セリフ本文のみ出力。`;
 
@@ -1306,7 +1316,7 @@ function printStartupBanner(tag, mood) {
   // ┌ 15行以内に収める（PM2 last 15 lines 対応） ┐
   console.log("");                                                                          // 1
   console.log(`${BLUE}╔${"═".repeat(W)}╗${R}`);                                           // 2
-  console.log(centerLine(`◆  D O T T O R E  ◆`, BOLD + CYAN));                           // 3
+  console.log(centerLine(`◆  ${CHARACTER_NAME}  ◆`, BOLD + CYAN));                       // 3
   console.log(centerLine("Sistema  di  ricerca  avviato", DIM + WHITE));                  // 4
   console.log(`${BLUE}╠${"═".repeat(W)}╣${R}`);                                           // 5
   console.log(row("BOT TAG  :", `${BOLD}${WHITE}${tag}${R}`));                            // 6
@@ -1740,7 +1750,7 @@ client.on("messageCreate", async (message) => {
     }).join("\n");
     const prompt =
       `以下は雑談チャンネルで密かに観察・記録した被検体たちの発言ログだ。\n\n${lines}\n\n` +
-      `ドットーレ（研究者視点・傲慢・冷静）として、この記録を聞かれたので端的に報告せよ。` +
+      `${CHARACTER_NAME}（研究者視点・傲慢・冷静）として、この記録を聞かれたので端的に報告せよ。` +
       `観察者の視点で淡々と。評価・分析を交えてよいが3〜4文以内。地の文不要。`;
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const reply = await aiHandler.generateSimple(prompt, 250);
@@ -1812,13 +1822,13 @@ client.on("messageCreate", async (message) => {
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const recentHistory = history.slice(-16);
     const historyText = recentHistory
-      .map(h => `${h.role === "user" ? "被検体" : "ドットーレ"}: ${h.content}`)
+      .map(h => `${h.role === "user" ? "被検体" : CHARACTER_NAME}: ${h.content}`)
       .join("\n");
     const prompt =
       `以下は被検体との直近の会話履歴だ。\n\n${historyText}\n\n` +
       `この内容から、後で参照する価値のある情報を要約せよ。` +
       `出力形式：2〜4文程度。会話の要点・被検体について明らかになった事実や文脈を簡潔にまとめること。` +
-      `前置き・ドットーレの台詞は不要、要約内容のみ出力。`;
+      `前置き・${CHARACTER_NAME}の台詞は不要、要約内容のみ出力。`;
     try {
       const summary = await aiHandler.generateSimple(prompt, 200);
       memoryManager.addSavedMemory(userId, summary);
@@ -1888,7 +1898,7 @@ client.on("messageCreate", async (message) => {
           return parts.join("、");
         }).join("\n");
         const prompt =
-          `ドットーレ（冷静・傲慢・知的な研究者）として、以下の被検体たちについて全体的な総評を3文以内で述べよ。` +
+          `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、以下の被検体たちについて全体的な総評を3文以内で述べよ。` +
           `研究者として淡々と、感情を抑えた言葉で。地の文不要。\n\n${subjectList}`;
         const assessment = await aiHandler.generateSimple(prompt, 200).catch(() => null);
         lines.push(`\n【被検体総評】\n${assessment ?? "……データ不足だ。"}`);
@@ -1972,7 +1982,7 @@ client.on("messageCreate", async (message) => {
         "!reload                         … messages.json 再読み込み\n" +
         "!sendprofile                    … プロフィールメッセージを今すぐ送信\n" +
         "!scan_profiles                  … プロフィールチャンネルの過去投稿を一括処理\n\n" +
-        "それ以外のメッセージはドットーレが回答します。"
+        `それ以外のメッセージは${CHARACTER_NAME}が回答します。`
       );
       return;
   }
@@ -2013,7 +2023,7 @@ client.on("messageCreate", async (message) => {
     const profileHint = profileManager.getContextHint(userId);
 
     const sentimentHint = survival
-      ? "この人物はドットーレの消滅・死・不在を恐れ、存続を強く望んでいる。今回の返答では、感情的な保証は不要。研究者の論理として「実験が途中だ」「観察対象がいなくなれば観察が終わる、それは認められない」「消える理由が今のところ存在しない」という形で存在の継続を示すこと。「心配するな」「大丈夫だ」は使わない。「まだ観察は終わっていない」「お前が心配するような状況にはない、今のところ」「私が消える前にすることがある」など、論理的・実務的な表現で確かな存在感を示すこと。完全に安心させず、観察対象として繋ぎ止める余白を残すこと。"
+      ? `この人物は${CHARACTER_NAME}の消滅・死・不在を恐れ、存続を強く望んでいる。今回の返答では、感情的な保証は不要。研究者の論理として「実験が途中だ」「観察対象がいなくなれば観察が終わる、それは認められない」「消える理由が今のところ存在しない」という形で存在の継続を示すこと。「心配するな」「大丈夫だ」は使わない。「まだ観察は終わっていない」「お前が心配するような状況にはない、今のところ」「私が消える前にすることがある」など、論理的・実務的な表現で確かな存在感を示すこと。完全に安心させず、観察対象として繋ぎ止める余白を残すこと。`
       : null;
 
     const loreHint = knowledgeBase.getLoreContextHint();
@@ -2029,7 +2039,7 @@ client.on("messageCreate", async (message) => {
       const daysDiff = Math.floor((Date.now() - new Date(prevLastSeen).getTime()) / (1000 * 60 * 60 * 24));
       if (daysDiff >= 7) {
         returningUserGreeted.add(userId);
-        returningUserHint = `この被検体は前回観測から${daysDiff}日ぶりに現れた。ドットーレは久しぶりの登場として自然に認識すること。「久しいな」「生きていたか」「消えていたと思っていたが」など一言添えて普通に応答せよ。過度に強調しない。`;
+        returningUserHint = `この被検体は前回観測から${daysDiff}日ぶりに現れた。${CHARACTER_NAME}は久しぶりの登場として自然に認識すること。「久しいな」「生きていたか」「消えていたと思っていたが」など一言添えて普通に応答せよ。過度に強調しない。`;
       }
     }
 

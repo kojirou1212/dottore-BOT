@@ -2,7 +2,9 @@
 const fs = require("fs");
 const path = require("path");
 
-const PROFILES_PATH = path.join(__dirname, "user-profiles.json");
+const PROFILES_PATH = process.env.PROFILES_FILE
+  ? path.resolve(__dirname, process.env.PROFILES_FILE)
+  : path.join(__dirname, "user-profiles.json");
 
 // 日本語フィールド名 → 内部キー
 const FIELD_MAP = {
@@ -48,7 +50,8 @@ function familiarityLabel(messageCount) {
 }
 
 class ProfileManager {
-  constructor() {
+  constructor(characterName = "ドットーレ") {
+    this.characterName = characterName;
     this.profiles = {};
     this.load();
   }
@@ -205,7 +208,7 @@ class ProfileManager {
       lines.push(`${label}: ${p.userFields[field] ?? "未記入"}`);
     }
 
-    lines.push("\n【観察記録（ドットーレ記入）】");
+    lines.push(`\n【観察記録（${this.characterName}記入）】`);
     lines.push(`観測回数: ${p.botRecord.messageCount}回`);
     lines.push(`継続日数: ${this.getTenureDays(userId)}日`);
     lines.push(`馴染み度: ${familiarityLabel(p.botRecord.messageCount)}`);
@@ -241,7 +244,7 @@ class ProfileManager {
     if (p.userFields.tendency) parts.push(`行動傾向「${p.userFields.tendency}」`);
     if (p.userFields.memo)     parts.push(`備考「${p.userFields.memo}」`);
     if (p.botRecord.survivalCount > 0) {
-      parts.push(`ドットーレの生存を心配する発言${p.botRecord.survivalCount}回観測済み`);
+      parts.push(`${this.characterName}の生存を心配する発言${p.botRecord.survivalCount}回観測済み`);
     }
 
     // 年齢が未成年の場合は特別注記
@@ -256,7 +259,7 @@ class ProfileManager {
 
     // ドットーレの観察メモ
     const observationHint = p.botRecord.observation
-      ? `ドットーレによる人物評価：「${p.botRecord.observation}」`
+      ? `${this.characterName}による人物評価：「${p.botRecord.observation}」`
       : "";
 
     // 馴染み度に応じた「予測通りの対応を試す」実験的態度のヒント（優しさではなく観察行為として）

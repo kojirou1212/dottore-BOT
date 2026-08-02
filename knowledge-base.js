@@ -2,7 +2,9 @@
 const fs = require("fs");
 const path = require("path");
 
-const KB_PATH = path.join(__dirname, "knowledge-base.json");
+const KB_PATH = process.env.KB_FILE
+  ? path.resolve(__dirname, process.env.KB_FILE)
+  : path.join(__dirname, "knowledge-base.json");
 
 class KnowledgeBase {
   constructor() {

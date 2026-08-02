@@ -284,6 +284,55 @@ pm2 logs dottore-twitter
 
 ---
 
+# パンタローネ Bot（第二のキャラクター）
+
+`bot.js` をフォークせず共用したまま、ドットーレとは別のキャラクター「パンタローネ」（Genshin Impact、第九席「調停者」）を3つ目のpm2プロセスとして動かす構成です。設定ファイルとシステムプロンプトを差し替えるだけで、`dottore-server-a`/`dottore-server-b`と全く同じ仕組みの上で動作します。
+
+## 現在の範囲（フェーズ1）
+
+- 対象は指定した1チャンネルのみ、テキストチャットの人間ユーザーとの会話に限定。
+- VC・Twitter・ドットーレBotとの直接会話は今回未対応（次フェーズで検討）。
+- ドットーレとはプロフィール・記憶・知識ベースを完全に分離したファイルで管理（`*-pantalone.json`）。同一人物でも、ドットーレ側の観察データがパンタローネ側に漏れることはない。
+
+## セットアップ手順
+
+### 1. Discord Developer Portalで新規アプリを作成
+
+1. https://discord.com/developers/applications にアクセスし、新規Applicationを作成（Bot Userも追加）
+2. **Privileged Gateway Intents** で `Message Content Intent` を有効化
+3. Bot Permissions: `Send Messages` / `Read Message History` のみで良い（VCは今回使わないため `Connect`/`Speak` は不要）
+4. OAuth2 URL Generatorで招待リンクを作成し、対象チャンネル（`1532711099319849100`）が属するサーバーへ招待
+
+### 2. config-pantalone.json の設定
+
+雛形は作成済み。以下を記入してください。
+
+| キー | 説明 |
+|------|------|
+| `discord.token` | 上記で発行したパンタローネ専用のBotトークン |
+| `discord.targetChannelIds` | パンタローネが応答する対象チャンネル（雛形では専用チャンネル1つのみ） |
+| `grok.apiKey` / `gemini.apiKey` | 既存のドットーレ用キーを流用可（別キーにしても問題なし） |
+| `ai.systemPromptFile` | `system-prompt-pantalone.txt`（パンタローネのキャラクター設定） |
+| `character.name` | `"パンタローネ"` — 定時挨拶・観察記録表示など、bot.js内の呼称表示に使われる |
+| `features.*` | フェーズ1では全項目 `false`。VC自動参加・定時つぶやき・記念日メッセージ等をすべて無効化するため |
+
+### 3. pm2で起動
+
+`ecosystem.config.js`に`pantalone-server`として登録済み。
+
+```bash
+pm2 start ecosystem.config.js --only pantalone-server
+pm2 logs pantalone-server
+```
+
+## 今後の予定（フェーズ2以降）
+
+- ドットーレBotとパンタローネBotの直接会話（ループ防止・頻度制御の実装が必要）
+- VC音声対応（専用音声素材の用意が必要）
+- Twitter展開
+
+---
+
 ## 環境変数（Railway等）
 
 | 変数名 | 説明 |
