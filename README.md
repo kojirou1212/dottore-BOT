@@ -301,7 +301,7 @@ pm2 logs dottore-twitter
 1. https://discord.com/developers/applications にアクセスし、新規Applicationを作成（Bot Userも追加）
 2. **Privileged Gateway Intents** で `Message Content Intent` を有効化
 3. Bot Permissions: `Send Messages` / `Read Message History` のみで良い（VCは今回使わないため `Connect`/`Speak` は不要）
-4. OAuth2 URL Generatorで招待リンクを作成し、対象チャンネル（`1532711099319849100`）が属するサーバーへ招待
+4. OAuth2 URL Generatorで招待リンクを作成し、対象チャンネル（`807779337331015693`）が属するサーバーへ招待
 
 ### 2. config-pantalone.json の設定
 
