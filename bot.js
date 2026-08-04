@@ -358,17 +358,29 @@ async function handleProfilePost(message) {
 
   try { await message.react("🔬"); } catch (_) {}
 
-  const PROFILE_REG_REPLIES = [
-    "……データを受け取った。記録する。",
-    "登録を確認した。被検体として管理下に置く。",
-    "……ふん。一応、記録しておこう。",
-    "被検体よ、情報を受領した。引き続き観察する。",
-    "……記録完了。これで管理対象だ。",
-    "データ、確認した。期待はしていないが、参考にしよう。",
-    "……登録を認める。以後、観察を続ける。",
-  ];
+  const PROFILE_REG_REPLIES = {
+    "ドットーレ": [
+      "……データを受け取った。記録する。",
+      "登録を確認した。被検体として管理下に置く。",
+      "……ふん。一応、記録しておこう。",
+      "被検体よ、情報を受領した。引き続き観察する。",
+      "……記録完了。これで管理対象だ。",
+      "データ、確認した。期待はしていないが、参考にしよう。",
+      "……登録を認める。以後、観察を続ける。",
+    ],
+    "パンタローネ": [
+      "……ご登録、確かに拝見いたしました。貴重な情報、頂戴しております。",
+      "登録、確認いたしました。今後ともお付き合いのほど、よろしくお願いいたします。",
+      "なるほど……。よい対価をいただきました。",
+      "情報、確かに受け取りました。……悪くない取引です。",
+      "……登録、確認いたしました。今後の対話を楽しみにしております。",
+      "拝見いたしました。まずまず、といったところでしょうか。",
+      "……ご登録、ありがとうございます。これも一つの、大切な情報として。",
+    ],
+  };
   try {
-    const reply = PROFILE_REG_REPLIES[Math.floor(Math.random() * PROFILE_REG_REPLIES.length)];
+    const replyList = PROFILE_REG_REPLIES[CHARACTER_NAME] ?? PROFILE_REG_REPLIES["ドットーレ"];
+    const reply = replyList[Math.floor(Math.random() * replyList.length)];
     await message.reply(reply);
   } catch (_) {}
 
@@ -1493,11 +1505,15 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
-  // !say はどのチャンネルからでも管理者が使用可能
-  if (message.content.trimStart().startsWith("!say")) {
+  // !say-d / !say-p はどのチャンネルからでも管理者が使用可能。
+  // 各Botは自分宛のサフィックスにのみ反応し、宛先が違う場合は無反応（複数Botが同じチャンネルにいても二重送信しない）。
+  const sayMatch = message.content.trimStart().match(/^!say-(d|p)\b/);
+  if (sayMatch) {
+    const targetCharacter = sayMatch[1] === "d" ? "ドットーレ" : "パンタローネ";
+    if (CHARACTER_NAME !== targetCharacter) return;
     const isAdmin = message.member?.permissions.has("Administrator") ?? false;
     if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
-    const sayText = message.content.trim().slice("!say".length).trim();
+    const sayText = message.content.trim().slice(sayMatch[0].length).trim();
     if (!sayText) { await message.reply("送信するテキストを入力しろ。"); return; }
     try { await message.delete(); } catch (_) {}
     await message.channel.send(sayText);
@@ -1978,7 +1994,8 @@ client.on("messageCreate", async (message) => {
         "!resetall                       … 全ユーザーの会話履歴をリセット\n" +
         "!lore / !lore set / !lore delete … 知識管理\n" +
         "!memory clear                   … 記憶メモ消去\n" +
-        "!say [テキスト]                 … 任意チャンネルで発言\n" +
+        "!say-d [テキスト]               … ドットーレとして任意チャンネルで発言\n" +
+        "!say-p [テキスト]               … パンタローネとして任意チャンネルで発言\n" +
         "!reload                         … messages.json 再読み込み\n" +
         "!sendprofile                    … プロフィールメッセージを今すぐ送信\n" +
         "!scan_profiles                  … プロフィールチャンネルの過去投稿を一括処理\n\n" +
@@ -2088,9 +2105,11 @@ client.on("messageCreate", async (message) => {
     } catch (_) {
       await message.channel.send(replyText).catch(() => {});
     }
-    client.channels.fetch("1510458726405116086").then((ch) => {
-      if (ch) ch.send(`[エラー] ${userTag}\n\`\`\`\n${error.stack ?? error.message}\n\`\`\``).catch(() => {});
-    }).catch(() => {});
+    if (debugChannelId) {
+      client.channels.fetch(debugChannelId).then((ch) => {
+        if (ch) ch.send(`[エラー] ${userTag}\n\`\`\`\n${error.stack ?? error.message}\n\`\`\``).catch(() => {});
+      }).catch(() => {});
+    }
   }
 });
 
