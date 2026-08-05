@@ -270,10 +270,17 @@ class ProfileManager {
       ? `ある程度観測データが蓄積された被検体だ（発言${count}回）。ごく稀に、要求通りの対応を試験的に返し反応を見てもよい。基本は従来通り拒否・はぐらかしを優先する。`
       : "";
 
-    if (parts.length === 0 && !ageNote && !weaknessHint && !observationHint && !familiarityHint) return "";
+    // 汎用の関係進展段階（50回到達で段階1、以降40回ごとに+1）。
+    // 具体的な意味づけはキャラクターごとのシステムプロンプト側に委ねる（未使用のキャラは無視してよい）。
+    const intimacyStage = count < 50 ? 0 : 1 + Math.floor((count - 50) / 40);
+    const intimacyStageHint = intimacyStage > 0
+      ? `【関係進展段階】${intimacyStage}（会話${count}回）`
+      : "";
+
+    if (parts.length === 0 && !ageNote && !weaknessHint && !observationHint && !familiarityHint && !intimacyStageHint) return "";
 
     const baseHint = parts.length > 0 ? `【この被検体の記録】${parts.join("、")}。` : "";
-    return [baseHint, observationHint, ageNote, weaknessHint, familiarityHint].filter(Boolean).join("\n");
+    return [baseHint, observationHint, ageNote, weaknessHint, familiarityHint, intimacyStageHint].filter(Boolean).join("\n");
   }
 }
 
