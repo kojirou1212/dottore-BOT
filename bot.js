@@ -74,6 +74,10 @@ if (!config.gemini?.apiKey) {
 // 「（冷静・傲慢・知的な研究者）」等ドットーレ固有の人格描写を含んだまま。
 // 別キャラでこれらのfeaturesを有効化する際は、当該プロンプト文面も要見直し。
 const CHARACTER_NAME = config.character?.name || "ドットーレ";
+const IS_PANTALONE = CHARACTER_NAME === "パンタローネ";
+const ADMIN_REQUIRED_REPLY = IS_PANTALONE
+  ? "……申し訳ございませんが、管理者権限が必要です。"
+  : "……管理者権限が必要だ。";
 
 // ─── 動作モード ────────────────────────────────────────────────────────────
 const BOT_MODE = (process.env.BOT_MODE || "all").trim();
@@ -412,7 +416,7 @@ async function handleLoreCommand(message) {
   if (!args) {
     const cats = knowledgeBase.listLoreCategories();
     if (cats.length === 0) {
-      await message.reply("……まだ何も登録されていない。");
+      await message.reply(IS_PANTALONE ? "……まだ、何も記録がございませんね。" : "……まだ何も登録されていない。");
     } else {
       await message.reply(`【登録済み知識】\n${cats.map(c => `・${c}`).join("\n")}`);
     }
@@ -422,29 +426,33 @@ async function handleLoreCommand(message) {
   if (args.startsWith("set ") && isAdmin) {
     const rest = args.slice("set ".length).trim();
     const spaceIdx = rest.search(/\s/);
-    if (spaceIdx === -1) { await message.reply("……カテゴリと内容を両方指定しろ。"); return; }
+    if (spaceIdx === -1) { await message.reply(IS_PANTALONE ? "……カテゴリと内容、両方をご指定ください。" : "……カテゴリと内容を両方指定しろ。"); return; }
     const cat = rest.slice(0, spaceIdx).trim();
     const loreContent = rest.slice(spaceIdx + 1).trim();
     knowledgeBase.setLore(cat, loreContent);
-    await message.reply(`……「${cat}」を記録した。`);
+    await message.reply(IS_PANTALONE ? `……「${cat}」、確かに記録いたしました。` : `……「${cat}」を記録した。`);
     return;
   }
 
   if (args.startsWith("delete ") && isAdmin) {
     const cat = args.slice("delete ".length).trim();
     const ok = knowledgeBase.deleteLore(cat);
-    await message.reply(ok ? `……「${cat}」を削除した。` : `……「${cat}」は存在しない。`);
+    if (IS_PANTALONE) {
+      await message.reply(ok ? `……「${cat}」、削除いたしました。` : `……「${cat}」は、存在しないようですね。`);
+    } else {
+      await message.reply(ok ? `……「${cat}」を削除した。` : `……「${cat}」は存在しない。`);
+    }
     return;
   }
 
   if (args.startsWith("set ") || args.startsWith("delete ")) {
-    await message.reply("……管理者権限が必要だ。");
+    await message.reply(ADMIN_REQUIRED_REPLY);
     return;
   }
 
   const entry = knowledgeBase.getLore(args);
   if (!entry) {
-    await message.reply(`……「${args}」というカテゴリは存在しない。`);
+    await message.reply(IS_PANTALONE ? `……「${args}」というカテゴリは、存在しないようですね。` : `……「${args}」というカテゴリは存在しない。`);
   } else {
     await message.reply(`【${args}】\n${entry.content}\n（更新: ${entry.updatedAt}）`);
   }
@@ -1512,9 +1520,9 @@ client.on("messageCreate", async (message) => {
     const targetCharacter = sayMatch[1] === "d" ? "ドットーレ" : "パンタローネ";
     if (CHARACTER_NAME !== targetCharacter) return;
     const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-    if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+    if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
     const sayText = message.content.trim().slice(sayMatch[0].length).trim();
-    if (!sayText) { await message.reply("送信するテキストを入力しろ。"); return; }
+    if (!sayText) { await message.reply(IS_PANTALONE ? "送信するテキストをご入力ください。" : "送信するテキストを入力しろ。"); return; }
     try { await message.delete(); } catch (_) {}
     await message.channel.send(sayText);
     return;
@@ -1543,7 +1551,7 @@ client.on("messageCreate", async (message) => {
     const c = message.content.trim();
     if (c === "!lore" || c.startsWith("!lore ")) {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+      if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
       await handleLoreCommand(message);
     }
     return;
@@ -1706,7 +1714,7 @@ client.on("messageCreate", async (message) => {
       if (sheet) {
         await message.reply(sheet);
       } else {
-        await message.reply("……記録がない。まず何か発言しろ。そうすれば観察を開始する。");
+        await message.reply(IS_PANTALONE ? "……まだ記録がございません。まずは何かお話しください。そこから始めましょう。" : "……記録がない。まず何か発言しろ。そうすれば観察を開始する。");
       }
       return;
     }
@@ -1716,32 +1724,35 @@ client.on("messageCreate", async (message) => {
       const rest = args.slice("set ".length).trim();
       const spaceIdx = rest.search(/\s/);
       if (spaceIdx === -1) {
-        await message.reply("……値が空だ。`!profile set 呼び名 [名前]` の形式で入力しろ。");
+        await message.reply(IS_PANTALONE ? "……値が空のようですね。`!profile set 呼び名 [名前]` の形式でご入力ください。" : "……値が空だ。`!profile set 呼び名 [名前]` の形式で入力しろ。");
         return;
       }
       const field = rest.slice(0, spaceIdx);
       const value = rest.slice(spaceIdx + 1).trim();
       const ALLOWED_FIELDS = ["呼び名", "備考"];
       if (!ALLOWED_FIELDS.includes(field)) {
-        await message.reply(`……「${field}」は設定できない。呼び名・備考 のみ指定可能だ。`);
+        await message.reply(IS_PANTALONE ? `……「${field}」は設定いただけません。呼び名・備考のみご指定いただけます。` : `……「${field}」は設定できない。呼び名・備考 のみ指定可能だ。`);
         return;
       }
       const ok = profileManager.setField(userId, field, value, userTag);
-      await message.reply(ok
-        ? `……「${field}」を「${value}」として記録した。`
-        : `……記録に失敗した。`
-      );
+      if (IS_PANTALONE) {
+        await message.reply(ok ? `……「${field}」を「${value}」として記録いたしました。` : `……記録に失敗いたしました。`);
+      } else {
+        await message.reply(ok ? `……「${field}」を「${value}」として記録した。` : `……記録に失敗した。`);
+      }
       return;
     }
 
-    await message.reply("……使い方が間違っている。\n`!profile` … 表示\n`!profile set 呼び名 [名前]` … 呼び名を記入\n`!profile set 備考 [内容]` … 備考を記入");
+    await message.reply(IS_PANTALONE
+      ? "……使い方が異なるようですね。\n`!profile` … 表示\n`!profile set 呼び名 [名前]` … 呼び名を記入\n`!profile set 備考 [内容]` … 備考を記入"
+      : "……使い方が間違っている。\n`!profile` … 表示\n`!profile set 呼び名 [名前]` … 呼び名を記入\n`!profile set 備考 [内容]` … 備考を記入");
     return;
   }
 
   // ── !lore ─────────────────────────────────────────────────────
   if (content === "!lore" || content.startsWith("!lore ")) {
     const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-    if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+    if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
     await handleLoreCommand(message);
     return;
   }
@@ -1750,13 +1761,13 @@ client.on("messageCreate", async (message) => {
   if (content === "!nani") {
     const topics = zatsuChannelId ? channelTopics.get(zatsuChannelId) : null;
     if (!topics || topics.length === 0) {
-      await message.reply("……まだ何も記録していない。雑談チャンネルに動きがない。");
+      await message.reply(IS_PANTALONE ? "……まだ何も、記録がございません。雑談チャンネルの動きも見当たりませんね。" : "……まだ何も記録していない。雑談チャンネルに動きがない。");
       return;
     }
     const now = Date.now();
     const recent = topics.filter(t => now - t.timestamp < TOPIC_MAX_AGE_MS);
     if (recent.length === 0) {
-      await message.reply("……記録はあるが、すべて古いデータだ。最近の動きはない。");
+      await message.reply(IS_PANTALONE ? "……記録はございますが、いずれも古いデータですね。最近の動きは見当たりません。" : "……記録はあるが、すべて古いデータだ。最近の動きはない。");
       return;
     }
     const lines = recent.slice(-10).map(t => {
@@ -1770,7 +1781,7 @@ client.on("messageCreate", async (message) => {
       `観察者の視点で淡々と。評価・分析を交えてよいが3〜4文以内。地の文不要。`;
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
     const reply = await aiHandler.generateSimple(prompt, 250);
-    await message.reply(reply || "……記録はある。だが、今は話す気分ではない。");
+    await message.reply(reply || (IS_PANTALONE ? "……記録はございます。ですが、今はあまり話す気分ではありませんね。" : "……記録はある。だが、今は話す気分ではない。"));
     return;
   }
 
@@ -1778,7 +1789,13 @@ client.on("messageCreate", async (message) => {
   if (content === "!base") {
     const entry = knowledgeBase.getUserBase(userId);
     if (!entry) {
-      await message.reply(`……${config.discord.profileChannelId ? "プロフィールチャンネルに投稿すれば記録する。" : "基本情報が登録されていない。"}`);
+      if (IS_PANTALONE) {
+        await message.reply(`……${config.discord.profileChannelId ? "プロフィールチャンネルにご投稿いただければ、記録いたします。" : "基本情報は、まだ登録されていないようですね。"}`);
+      } else {
+        await message.reply(`……${config.discord.profileChannelId ? "プロフィールチャンネルに投稿すれば記録する。" : "基本情報が登録されていない。"}`);
+      }
+    } else if (IS_PANTALONE) {
+      await message.reply(`……「${entry.displayName}」様の基本情報でございます。\n（登録: ${entry.updatedAt}）\n\n${entry.postedProfile}`);
     } else {
       await message.reply(`……被検体「${entry.displayName}」の基本情報。\n（登録: ${entry.updatedAt}）\n\n${entry.postedProfile}`);
     }
@@ -1791,15 +1808,21 @@ client.on("messageCreate", async (message) => {
 
     if (args === "clear") {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+      if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
       const ok = memoryManager.clearMemories(userId);
-      await message.reply(ok ? "……記憶を消去した。" : "……記録がない。");
+      if (IS_PANTALONE) {
+        await message.reply(ok ? "……記憶を消去いたしました。" : "……記録がございません。");
+      } else {
+        await message.reply(ok ? "……記憶を消去した。" : "……記録がない。");
+      }
       return;
     }
 
     const display = memoryManager.formatForDisplay(userId);
     if (!display) {
-      await message.reply("……まだ何も記録されていない。");
+      await message.reply(IS_PANTALONE ? "……まだ何も記録されておりません。" : "……まだ何も記録されていない。");
+    } else if (IS_PANTALONE) {
+      await message.reply(`……あなたに関する記憶でございます。\n\n${display}`);
     } else {
       await message.reply(`……お前に関する記憶。\n\n${display}`);
     }
@@ -1812,27 +1835,35 @@ client.on("messageCreate", async (message) => {
 
     if (args === "list") {
       const display = memoryManager.formatSavedForDisplay(userId);
-      await message.reply(display ? `……明示的に記録した事項。\n\n${display}` : "……まだ何も記録していない。");
+      if (IS_PANTALONE) {
+        await message.reply(display ? `……明示的に記録した事項でございます。\n\n${display}` : "……まだ何も記録しておりません。");
+      } else {
+        await message.reply(display ? `……明示的に記録した事項。\n\n${display}` : "……まだ何も記録していない。");
+      }
       return;
     }
 
     if (args === "clear") {
       const ok = memoryManager.clearSavedMemories(userId);
-      await message.reply(ok ? "……記録をすべて消去した。" : "……記録がない。");
+      if (IS_PANTALONE) {
+        await message.reply(ok ? "……記録をすべて消去いたしました。" : "……記録がございません。");
+      } else {
+        await message.reply(ok ? "……記録をすべて消去した。" : "……記録がない。");
+      }
       return;
     }
 
     if (args) {
       // 直接テキストを指定 → そのまま保存
       memoryManager.addSavedMemory(userId, args);
-      await message.reply(`……記録した。「${args}」`);
+      await message.reply(IS_PANTALONE ? `……記録いたしました。「${args}」` : `……記録した。「${args}」`);
       return;
     }
 
     // 引数なし：直近の会話を要約して保存
     const history = aiHandler.getHistory(userId);
     if (history.length === 0) {
-      await message.reply("……まだ会話がない。記録するものがない。");
+      await message.reply(IS_PANTALONE ? "……まだ会話がございません。記録するものがございませんね。" : "……まだ会話がない。記録するものがない。");
       return;
     }
     if (config.ai.typingIndicator) await message.channel.sendTyping().catch(() => {});
@@ -1848,10 +1879,10 @@ client.on("messageCreate", async (message) => {
     try {
       const summary = await aiHandler.generateSimple(prompt, 200);
       memoryManager.addSavedMemory(userId, summary);
-      await message.reply(`……記録した。\n\n${summary}`);
+      await message.reply(IS_PANTALONE ? `……記録いたしました。\n\n${summary}` : `……記録した。\n\n${summary}`);
     } catch (err) {
       console.error("[Bot] !oboete エラー:", err.message);
-      await message.reply("……記録に失敗した。");
+      await message.reply(IS_PANTALONE ? "……記録に失敗いたしました。" : "……記録に失敗した。");
     }
     return;
   }
@@ -1888,14 +1919,14 @@ client.on("messageCreate", async (message) => {
 
     case "!reset":
       aiHandler.clearHistory(userId);
-      await message.reply("気が変わった。記憶操作の薬だ、飲め。今すぐ");
+      await message.reply(IS_PANTALONE ? "……承知いたしました。これまでのやり取りは、一度清算といたしましょう。" : "気が変わった。記憶操作の薬だ、飲め。今すぐ");
       return;
 
     case "!resetall": {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+      if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
       aiHandler.clearAllHistory();
-      await message.reply("……全員分だ。記憶操作の薬を投与した。逆らうな。");
+      await message.reply(IS_PANTALONE ? "……全員分、清算いたしました。悪しからず。" : "……全員分だ。記憶操作の薬を投与した。逆らうな。");
       return;
     }
 
@@ -1928,25 +1959,26 @@ client.on("messageCreate", async (message) => {
 
     case "!reload": {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+      if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
       const ok = loadMessages();
       if (ok) {
         const summary = Object.entries(messageLists).map(([k, v]) => `${k}: ${v.length}件`).join("\n");
         const scheduleSummary = Object.entries(scheduleMap).sort((a, b) => a[0] - b[0]).map(([h, l]) => `${h}時 → ${l}`).join(" / ");
-        await message.reply(`……再読み込み完了。\n\n【リスト】\n${summary}\n\n【スケジュール】\n${scheduleSummary}`);
+        const header = IS_PANTALONE ? "……再読み込みが完了いたしました。" : "……再読み込み完了。";
+        await message.reply(`${header}\n\n【リスト】\n${summary}\n\n【スケジュール】\n${scheduleSummary}`);
       } else {
-        await message.reply("……読み込みに失敗した。messages.json の構文を確認しろ。");
+        await message.reply(IS_PANTALONE ? "……読み込みに失敗いたしました。messages.json の構文をご確認ください。" : "……読み込みに失敗した。messages.json の構文を確認しろ。");
       }
       return;
     }
 
     case "!scan_profiles": {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
-      if (!isAdmin) { await message.reply("……管理者権限が必要だ。"); return; }
+      if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
 
       const profileChId = [...profileChannelIds][0];
       if (!profileChId) {
-        await message.reply("……profileChannelId が設定されていない。");
+        await message.reply(IS_PANTALONE ? "……profileChannelId が設定されていないようですね。" : "……profileChannelId が設定されていない。");
         return;
       }
       try {
@@ -1963,10 +1995,10 @@ client.on("messageCreate", async (message) => {
           processed++;
           await new Promise(r => setTimeout(r, 800));
         }
-        await message.reply(`……処理完了。${processed}件の被検体データを登録した。`);
+        await message.reply(IS_PANTALONE ? `……処理が完了いたしました。${processed}件のデータを登録いたしました。` : `……処理完了。${processed}件の被検体データを登録した。`);
       } catch (err) {
         console.error("[Bot] scan_profiles エラー:", err.message);
-        await message.reply("……処理中にエラーが発生した。");
+        await message.reply(IS_PANTALONE ? "……処理中にエラーが発生いたしました。" : "……処理中にエラーが発生した。");
       }
       return;
     }

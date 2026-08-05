@@ -40,7 +40,7 @@ const MILESTONES = [50, 150, 300, 500, 1000];
 // 馴染み度ラベル（観測回数に応じた段階表示）
 const FAMILIARITY_TIERS = [
   { min: 300, label: "長期観察対象（データ蓄積は稀な域）" },
-  { min: 100, label: "馴染みのある被検体" },
+  { min: 100, label: "馴染みのある相手" },
   { min: 20,  label: "継続観察中" },
   { min: 0,   label: "初期観察段階" },
 ];
@@ -196,14 +196,17 @@ class ProfileManager {
     const p = this.profiles[userId];
     if (!p) return null;
 
-    const lines = [`……被検体「${p.displayName}」の記録を開示する。\n`];
+    const isPantalone = this.characterName === "パンタローネ";
+    const lines = [isPantalone
+      ? `……「${p.displayName}」様の記録を開示いたします。\n`
+      : `……被検体「${p.displayName}」の記録を開示する。\n`];
 
     lines.push("【識別情報】");
     lines.push(`ID: ${p.displayName}`);
     lines.push(`初観測: ${p.botRecord.firstSeen}`);
     lines.push(`最終観測: ${p.botRecord.lastSeen}`);
 
-    lines.push("\n【被検体記入欄】");
+    lines.push(isPantalone ? "\n【ご記入欄】" : "\n【被検体記入欄】");
     for (const [field, label] of Object.entries(FIELD_LABELS)) {
       lines.push(`${label}: ${p.userFields[field] ?? "未記入"}`);
     }
@@ -213,7 +216,7 @@ class ProfileManager {
     lines.push(`継続日数: ${this.getTenureDays(userId)}日`);
     lines.push(`馴染み度: ${familiarityLabel(p.botRecord.messageCount)}`);
     lines.push(`心配発言: ${p.botRecord.survivalCount > 0 ? `${p.botRecord.survivalCount}回検知` : "なし"}`);
-    lines.push(`人物評価: ${p.botRecord.observation ?? "……まだ観察データが不足している。"}`);
+    lines.push(`人物評価: ${p.botRecord.observation ?? (isPantalone ? "……まだ評価するだけの材料が揃っておりません。" : "……まだ観察データが不足している。")}`);
 
     lines.push("\n── 記入コマンド ──");
     lines.push("`!profile set 呼び名 [名前]`");
