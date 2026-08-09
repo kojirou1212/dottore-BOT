@@ -1124,7 +1124,7 @@ function startScheduler() {
       return;
     }
 
-    if (StatusManager.TICK_HOURS.includes(hour)) {
+    if (statusManager.tickHours.includes(hour)) {
       statusManager.tick(hour);
       console.log(`[Scheduler] ステータス更新 (${hour}時 JST): ${statusManager.state.activity}`);
     }

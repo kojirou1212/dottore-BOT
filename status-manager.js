@@ -10,32 +10,97 @@ const STATUS_PATH = process.env.STATUS_FILE
   ? path.resolve(__dirname, process.env.STATUS_FILE)
   : path.join(__dirname, "bot-status.json");
 
-// 1日3回（9/15/21時JST）の定時チェックで「やること」を選び直す
-const TICK_HOURS = [9, 15, 21];
+// 「やること」のランダム選定用の定時チェック（食事・就寝とは別枠）
+const ACTIVITY_TICK_HOURS = [9, 15, 21];
 
-// キャラクターごとの「やること」8パターン。type はストレス・集中度の増減方向づけに使う
-// （labor=仕事寄りで上がる、rest=休息寄りで下がる）
+// キャラクターごとの食事時刻（JST時）。この時刻は空腹度に関わらず必ず食事を取る「ルーティン」になる。
+const MEAL_HOURS = {
+  "ドットーレ":   { breakfast: 8, lunch: 14, dinner: 21 },
+  "パンタローネ": { breakfast: 7, lunch: 12, dinner: 19 },
+};
+
+// キャラクターごとの就寝時刻（JST時。24:00は0時として扱う）。
+// 体力切れでこれより早く寝ることはあるが、これより遅くまで起きていることはない上限。
+const BEDTIME_HOUR = {
+  "ドットーレ":   3,
+  "パンタローネ": 0,
+};
+
+// キャラクターごとの「やること」パターン。
+// type はストレス・集中度の増減方向づけに使う（labor=仕事寄りで上がる、rest=休息寄りで下がる）。
+// hours はランダム選定の対象になり得る時間帯（ACTIVITY_TICK_HOURSのサブセット）。
+// auto:true の項目（睡眠中・朝食中/昼食中/夕食中）はランダム抽選の対象にせず、
+// 就寝時刻・食事時刻、または体力・空腹度が0になったターンにのみ強制的に選ばれる。
+// meal: "breakfast"|"lunch"|"dinner" は、どの食事時刻に対応するかを示す。
+function buildActivityPool(characterName, laborRestList) {
+  const meals = MEAL_HOURS[characterName] ?? MEAL_HOURS["ドットーレ"];
+  const bedtime = BEDTIME_HOUR[characterName] ?? BEDTIME_HOUR["ドットーレ"];
+  return [
+    ...laborRestList,
+    { name: "朝食中", type: "rest", hours: [meals.breakfast], auto: true, meal: "breakfast" },
+    { name: "昼食中", type: "rest", hours: [meals.lunch],     auto: true, meal: "lunch" },
+    { name: "夕食中", type: "rest", hours: [meals.dinner],    auto: true, meal: "dinner" },
+    { name: "睡眠中", type: "rest", hours: [bedtime],         auto: true, sleep: true },
+  ];
+}
+
 const ACTIVITY_POOL = {
-  "ドットーレ": [
-    { name: "実験中", type: "labor" },
-    { name: "経費明細書作成中", type: "labor" },
-    { name: "論文執筆中", type: "labor" },
-    { name: "被検体データ整理中", type: "labor" },
-    { name: "装置の調整中", type: "labor" },
-    { name: "休憩中", type: "rest" },
-    { name: "睡眠中", type: "rest" },
-    { name: "食事中", type: "rest" },
-  ],
-  "パンタローネ": [
-    { name: "経費明細書の承認中", type: "labor" },
-    { name: "資産運用の検討中", type: "labor" },
-    { name: "契約書の確認中", type: "labor" },
-    { name: "商談帰り", type: "rest" },
-    { name: "飲酒中", type: "rest" },
-    { name: "喫煙中", type: "rest" },
-    { name: "睡眠中", type: "rest" },
-    { name: "食事中", type: "rest" },
-  ],
+  "ドットーレ": buildActivityPool("ドットーレ", [
+    { name: "実験中",                 type: "labor", hours: [9, 15, 21] },
+    { name: "経費明細書作成中",       type: "labor", hours: [9, 15] },
+    { name: "論文執筆中",             type: "labor", hours: [15, 21] },
+    { name: "被検体データ整理中",     type: "labor", hours: [9, 15, 21] },
+    { name: "装置の調整中",           type: "labor", hours: [9, 15] },
+    { name: "解剖記録の作成中",       type: "labor", hours: [9, 15] },
+    { name: "培養槽の点検中",         type: "labor", hours: [9, 15, 21] },
+    { name: "新種の合成実験中",       type: "labor", hours: [9, 15, 21] },
+    { name: "被検体の選定中",         type: "labor", hours: [9, 15] },
+    { name: "上層部への報告書作成中", type: "labor", hours: [9, 15] },
+    { name: "実験動物の観察",         type: "labor", hours: [9, 15] },
+    { name: "部下への指示出し中",     type: "labor", hours: [9, 15] },
+    { name: "過去のデータ再検証中",   type: "labor", hours: [15, 21] },
+    { name: "薬品の調合中",           type: "labor", hours: [9, 15, 21] },
+    { name: "顕微鏡での観察中",       type: "labor", hours: [9, 15, 21] },
+    { name: "論文の査読中",           type: "labor", hours: [15, 21] },
+    { name: "機材の発注手続き中",     type: "labor", hours: [9, 15] },
+    { name: "標本の保存処理中",       type: "labor", hours: [9, 15] },
+    { name: "資料への目通し中",       type: "labor", hours: [9, 15, 21] },
+    { name: "苛立たしげに書類へ署名中", type: "labor", hours: [9, 15] },
+    { name: "新たな被検体候補の物色中", type: "labor", hours: [15, 21] },
+    { name: "休憩中",                 type: "rest",  hours: [9, 15, 21] },
+    { name: "読書中",                 type: "rest",  hours: [15, 21] },
+    { name: "散歩中",                 type: "rest",  hours: [9, 15] },
+    { name: "コーヒーを飲んでいる",   type: "rest",  hours: [9, 15, 21] },
+    { name: "仮眠中",                 type: "rest",  hours: [15, 21] },
+  ]),
+  "パンタローネ": buildActivityPool("パンタローネ", [
+    { name: "経費明細書の承認中",     type: "labor", hours: [9, 15] },
+    { name: "資産運用の検討中",       type: "labor", hours: [9, 15, 21] },
+    { name: "契約書の確認中",         type: "labor", hours: [9, 15] },
+    { name: "帳簿の照合中",           type: "labor", hours: [9, 15] },
+    { name: "為替相場の確認中",       type: "labor", hours: [9, 15, 21] },
+    { name: "新規融資案件の審査中",   type: "labor", hours: [9, 15] },
+    { name: "株主総会の資料作成中",   type: "labor", hours: [9, 15] },
+    { name: "投資家との電話対応中",   type: "labor", hours: [9, 15] },
+    { name: "北国の銀行への報告書作成中", type: "labor", hours: [15, 21] },
+    { name: "部下からの報告を受けている", type: "labor", hours: [9, 15] },
+    { name: "商談の準備中",           type: "labor", hours: [9, 15] },
+    { name: "契約条件の再交渉中",     type: "labor", hours: [9, 15, 21] },
+    { name: "資産価値の査定中",       type: "labor", hours: [9, 15, 21] },
+    { name: "顧客名簿の整理中",       type: "labor", hours: [15, 21] },
+    { name: "手紙の返信中",           type: "labor", hours: [9, 15, 21] },
+    { name: "会議に出席中",           type: "labor", hours: [9, 15] },
+    { name: "手帳にメモを取っている", type: "labor", hours: [9, 15, 21] },
+    { name: "商談帰り",               type: "rest",  hours: [15, 21] },
+    { name: "飲酒中",                 type: "rest",  hours: [21] },
+    { name: "喫煙中",                 type: "rest",  hours: [9, 15, 21] },
+    { name: "仕立て直しの相談中",     type: "rest",  hours: [15, 21] },
+    { name: "高級レストランでの会食中", type: "rest",  hours: [21] },
+    { name: "腕時計の手入れ中",       type: "rest",  hours: [9, 15, 21] },
+    { name: "読書中",                 type: "rest",  hours: [15, 21] },
+    { name: "散歩中",                 type: "rest",  hours: [9, 15] },
+    { name: "紅茶を飲んでいる",       type: "rest",  hours: [9, 15, 21] },
+  ]),
 };
 
 const EMOTION_POOL = {
@@ -52,6 +117,7 @@ function jstDateStr() {
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function randInt(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function uniqueSorted(arr) { return [...new Set(arr)].sort((a, b) => a - b); }
 
 function gaugeLabel(v, labels) {
   for (const l of labels) if (v <= l.max) return l.text;
@@ -84,6 +150,14 @@ class StatusManager {
     this.characterName = characterName;
     this.activities = ACTIVITY_POOL[characterName] ?? ACTIVITY_POOL["ドットーレ"];
     this.emotions = EMOTION_POOL[characterName] ?? EMOTION_POOL["ドットーレ"];
+    this.mealHours = MEAL_HOURS[characterName] ?? MEAL_HOURS["ドットーレ"];
+    this.bedtimeHour = BEDTIME_HOUR[characterName] ?? BEDTIME_HOUR["ドットーレ"];
+    // このキャラが定時チェックの対象になる時刻（やることの抽選 + 食事3回 + 就寝1回、重複除去）
+    this.tickHours = uniqueSorted([
+      ...ACTIVITY_TICK_HOURS,
+      this.mealHours.breakfast, this.mealHours.lunch, this.mealHours.dinner,
+      this.bedtimeHour,
+    ]);
     this.state = null;
     this.load();
   }
@@ -108,7 +182,7 @@ class StatusManager {
   }
 
   _initState() {
-    const laborActivities = this.activities.filter(a => a.type === "labor");
+    const laborActivities = this.activities.filter(a => a.type === "labor" && !a.auto);
     return {
       mood: 1,
       emotion: pick(this.emotions),
@@ -122,8 +196,11 @@ class StatusManager {
     };
   }
 
-  // 1日3回（TICK_HOURS）の定時チェックから呼ぶ。dottore-server-a/bは同じ状態ファイルを
-  // 共有しているため、同じ時間帯に両方から呼ばれても二重更新にならないよう鍵で防ぐ。
+  // this.tickHours に含まれる時刻の定時チェックから呼ぶ。
+  // 状態はファイルに永続化され、この鍵（日付+時刻）で二重更新を防ぐため、
+  // pm2再起動を挟んでも同じ時刻に再度tickが走るだけで内容は変わらない
+  // （＝就寝中に再起動しても、次の定時チェック時刻が来るまでステータスは一切変化しない）。
+  // dottore-server-a/bが同じ状態ファイルを共有している場合の二重更新防止も兼ねる。
   tick(hour) {
     const key = `${jstDateStr()}-${hour}`;
     if (this.state.lastTickKey === key) return;
@@ -135,25 +212,33 @@ class StatusManager {
     if (Math.random() < 0.35) s.mood = clamp(s.mood + (Math.random() < 0.5 ? -1 : 1), 0, 2);
     if (Math.random() < 0.35) s.emotion = pick(this.emotions.filter(e => e !== s.emotion));
 
-    // 空腹度・体力：時間経過で減っていく。0だったターンは食事／睡眠を取って回復する。
-    const ate = s.hunger <= 0;
-    const slept = s.stamina <= 0;
+    // 就寝：就寝時刻（上限）に達したら体力に関わらず強制的に寝る。それより前でも体力が0になれば寝る。
+    const isBedtime = hour === this.bedtimeHour;
+    const slept = isBedtime || s.stamina <= 0;
+
+    // 食事：朝食・昼食・夕食の時刻は空腹度に関わらず必ず食事を取る（ルーティン）。
+    // それ以外の時刻は、空腹度が0になった場合のみ突発的に食事する。就寝が最優先。
+    const mealEntry = this.activities.find(a => a.meal && a.hours[0] === hour);
+    const ate = !slept && (mealEntry != null || s.hunger <= 0);
+
     s.hunger = ate ? randInt(7, 10) : clamp(s.hunger - randInt(2, 4), 0, 10);
     s.stamina = slept ? randInt(7, 10) : clamp(s.stamina - randInt(2, 4), 0, 10);
     if (slept) s.sleepiness = 0;
 
-    // やること：睡眠・食事が最優先。それ以外は8パターンからランダムに選定
     if (slept) {
-      s.activity = this.activities.find(a => a.name === "睡眠中")?.name ?? this.activities[0].name;
+      s.activity = this.activities.find(a => a.sleep)?.name ?? this.activities[0].name;
     } else if (ate) {
-      s.activity = this.activities.find(a => a.name === "食事中")?.name ?? this.activities[0].name;
+      s.activity = mealEntry?.name ?? this.activities.find(a => a.meal)?.name ?? this.activities[0].name;
     } else {
-      s.activity = pick(this.activities).name;
+      const candidates = this.activities.filter(a => !a.auto && a.hours.includes(hour));
+      const pool = candidates.length > 0 ? candidates : this.activities.filter(a => !a.auto);
+      s.activity = pick(pool).name;
     }
 
-    // 眠気：夜（21時チェック）ほど溜まりやすく、朝（9時チェック）に大きく回復する
+    // 眠気：朝食の時刻に大きく回復し、それ以外は少しずつ溜まっていく（就寝時は0にリセット済み）
     if (!slept) {
-      const drift = hour === 21 ? randInt(1, 3) : hour === 9 ? -randInt(1, 3) : randInt(-1, 1);
+      const isWake = hour === this.mealHours.breakfast;
+      const drift = isWake ? -randInt(2, 4) : randInt(0, 2);
       s.sleepiness = clamp(s.sleepiness + drift, 0, 10);
     }
 
@@ -201,5 +286,4 @@ class StatusManager {
   }
 }
 
-StatusManager.TICK_HOURS = TICK_HOURS;
 module.exports = StatusManager;
