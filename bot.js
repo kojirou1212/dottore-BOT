@@ -9,6 +9,8 @@ const { VCHandler } = require("./vc-handler");
 const ProfileManager = require("./profile-manager");
 const KnowledgeBase = require("./knowledge-base");
 const MemoryManager = require("./memory-manager");
+const dailyStreak = require("./daily-streak");
+const StatusManager = require("./status-manager");
 
 // ─── 設定の読み込み（環境変数優先、なければ config.json）─────────────────
 let config;
@@ -75,6 +77,7 @@ if (!config.gemini?.apiKey) {
 // 別キャラでこれらのfeaturesを有効化する際は、当該プロンプト文面も要見直し。
 const CHARACTER_NAME = config.character?.name || "ドットーレ";
 const IS_PANTALONE = CHARACTER_NAME === "パンタローネ";
+const STREAK_CHARACTER_KEY = IS_PANTALONE ? "pantalone" : "dottore";
 const ADMIN_REQUIRED_REPLY = IS_PANTALONE
   ? "……申し訳ございませんが、管理者権限が必要です。"
   : "……管理者権限が必要だ。";
@@ -138,6 +141,7 @@ const client = new Client({
 const aiHandler = new AIHandler(config);
 const vcHandler = new VCHandler(config);
 const profileManager = new ProfileManager(CHARACTER_NAME);
+const statusManager = new StatusManager(CHARACTER_NAME);
 const knowledgeBase = new KnowledgeBase();
 const memoryManager = new MemoryManager();
 
@@ -575,12 +579,46 @@ function isSurvivalMessage(text) {
 
 // 観測回数マイルストーン到達時のセリフ（profileManager.checkMilestone と対応）
 const MILESTONE_LINES = {
-  50:   "……観測回数、50に達したか。悪くないデータ量だ。",
-  150:  "……150回か。……そろそろお前のパターンが見えてきた。",
-  300:  "……300。……随分と付き合いが長くなったものだな。",
-  500:  "……500、か。……ここまで来ると、単なる被検体では片付けられなくなる。",
-  1000: "……1000。……お前は私の記録の中でも、稀な部類に入る。",
+  "ドットーレ": {
+    50:   "……観測回数、50に達したか。悪くないデータ量だ。",
+    150:  "……150回か。……そろそろお前のパターンが見えてきた。",
+    300:  "……300。……随分と付き合いが長くなったものだな。",
+    500:  "……500、か。……ここまで来ると、単なる被検体では片付けられなくなる。",
+    1000: "……1000。……お前は私の記録の中でも、稀な部類に入る。",
+  },
+  "パンタローネ": {
+    50:   "……50回、ですか。……なるほど、悪くない対話量です。",
+    150:  "……150回。……貴方様の傾向も、そろそろ見えてまいりました。",
+    300:  "……300、ですか。……随分と、お付き合いいただいているのですね。",
+    500:  "……500、ですか。……もはや単なる対話相手とは申せないようです。",
+    1000: "……1000。……貴方様は、私の記録の中でも稀有な存在です。",
+  },
 };
+
+// パンタローネ・博士の「両方」に同じ日に話しかけてくれた連続日数のマイルストーン
+// （dailyStreak.recordContact と対応。両キャラを跨ぐ話なので、片方のセリフでも
+// もう一方の存在を軽く匂わせる）
+const STREAK_MILESTONE_LINES = {
+  "ドットーレ": {
+    3:   "……3日連続の観測データか。悪くない。",
+    7:   "……7日連続か。パンタローネの方にも、同じ頻度で顔を出しているようだな。……律儀なことだ。",
+    14:  "……14日連続。二人分の記録に、同じ密度で名前が並んでいる。……珍しい被検体だ。",
+    30:  "……30日連続とはな。……お前は、私とパンタローネ、双方にとって無視できない変数になりつつある。",
+    60:  "……60日連続、か。……ここまで来ると、偶然とは言わせない。",
+    100: "……100日連続。……お前は私の記録の中でも、稀な部類に入る。パンタローネの記録でも、恐らく同じだろう。",
+  },
+  "パンタローネ": {
+    3:   "……3日連続でのご来訪、確かに記録いたしました。",
+    7:   "……7日連続、ですか。……博士の方にも、同じ頻度でいらしているようですね。律儀な方だ。",
+    14:  "……14日連続。……私と博士、双方の記録に同じ密度でお名前が並んでおります。悪くない取引です。",
+    30:  "……30日連続とは。……もはや私にとっても博士にとっても、無視できない継続契約と呼べましょう。",
+    60:  "……60日連続、ですか。……これほどの継続は、そう多くはございません。",
+    100: "……100日連続。……貴方様は、私にとっても博士にとっても、稀少な資産となりつつあります。",
+  },
+};
+
+// 連続日数マイルストーンに応じた関係進展ボーナス（会話回数換算で加算）
+const STREAK_BONUS_BY_MILESTONE = { 3: 6, 7: 14, 14: 28, 30: 60, 60: 120, 100: 200 };
 
 // 鼻歌判定：延音符を含み、内容語を持たない音のみの文字列
 // 例: "んーーー" "ふ〜ふ〜" "らら〜" "〜〜〜"
@@ -1086,6 +1124,11 @@ function startScheduler() {
       return;
     }
 
+    if (StatusManager.TICK_HOURS.includes(hour)) {
+      statusManager.tick(hour);
+      console.log(`[Scheduler] ステータス更新 (${hour}時 JST): ${statusManager.state.activity}`);
+    }
+
     // ── AI生成の朝メッセージ（config.discord.aiJihouChannelId が設定された時間に送信）──
     const aiJihouEntries = config.discord.aiJihouSchedule ?? {};
     const aiJihouChannelId = aiJihouEntries[String(hour)] ?? "";
@@ -1583,8 +1626,20 @@ client.on("messageCreate", async (message) => {
 
   // 観測回数マイルストーン到達通知
   const reachedMilestone = profileManager.checkMilestone(userId);
-  if (reachedMilestone && MILESTONE_LINES[reachedMilestone]) {
-    message.channel.send(MILESTONE_LINES[reachedMilestone]).catch(() => {});
+  const milestoneLine = MILESTONE_LINES[CHARACTER_NAME]?.[reachedMilestone];
+  if (milestoneLine) {
+    message.channel.send(milestoneLine).catch(() => {});
+  }
+
+  // パンタローネ・博士の「両方」に同じ日に話しかけた連続日数の判定
+  const reachedStreak = dailyStreak.recordContact(userId, STREAK_CHARACTER_KEY);
+  if (reachedStreak) {
+    const bonus = STREAK_BONUS_BY_MILESTONE[reachedStreak] ?? reachedStreak * 2;
+    profileManager.addBonusCount(userId, bonus);
+    const streakLine = STREAK_MILESTONE_LINES[CHARACTER_NAME]?.[reachedStreak];
+    if (streakLine) {
+      message.channel.send(streakLine).catch(() => {});
+    }
   }
 
   const isVCCommand =
@@ -1593,13 +1648,13 @@ client.on("messageCreate", async (message) => {
     content === "!hakase" ||
     content.startsWith("!hakase ") ||
     content === "!owari" ||
-    content === "!status" ||
     content === "!kiite";
 
   const isProfileCommand = content === "!profile" || content.startsWith("!profile ");
+  const isStatusCommand = content === "!status";
 
   if (BOT_MODE === "text" && isVCCommand) return;
-  if (BOT_MODE === "vc" && !isVCCommand && !isProfileCommand) return;
+  if (BOT_MODE === "vc" && !isVCCommand && !isProfileCommand && !isStatusCommand) return;
 
   // ── !kiite ────────────────────────────────────────────────────
   if (content === "!kiite") {
@@ -1931,26 +1986,30 @@ client.on("messageCreate", async (message) => {
     }
 
     case "!status": {
-      const moodLabel = dailyMood === "good" ? "良好" : dailyMood === "bad" ? "不調" : "普通";
-      const moodNote  = dailyMood === "good" ? "（機嫌がいい）" : dailyMood === "bad" ? "（機嫌が悪い）" : "";
-      const lines = [`【本日の機嫌】${moodLabel}${moodNote}`];
+      const lines = [statusManager.format()];
 
-      // 被検体総評
-      const profileEntries = Object.values(profileManager.profiles).filter(p => p.userFields?.name);
-      if (profileEntries.length > 0) {
-        const subjectList = profileEntries.map(p => {
-          const parts = [p.userFields.name];
-          if (p.userFields.tendency) parts.push(`傾向:${p.userFields.tendency}`);
-          if (p.botRecord?.observation) parts.push(`評価:${p.botRecord.observation}`);
-          return parts.join("、");
-        }).join("\n");
-        const prompt =
-          `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、以下の被検体たちについて全体的な総評を3文以内で述べよ。` +
-          `研究者として淡々と、感情を抑えた言葉で。地の文不要。\n\n${subjectList}`;
-        const assessment = await aiHandler.generateSimple(prompt, 200).catch(() => null);
-        lines.push(`\n【被検体総評】\n${assessment ?? "……データ不足だ。"}`);
-      } else {
-        lines.push("\n【被検体総評】\n……登録された被検体がいない。");
+      // VC対応インスタンス（BOT_MODE=text以外）でのみ、従来の日替わり機嫌・被検体総評も併記する
+      if (BOT_MODE !== "text") {
+        const moodLabel = dailyMood === "good" ? "良好" : dailyMood === "bad" ? "不調" : "普通";
+        const moodNote  = dailyMood === "good" ? "（機嫌がいい）" : dailyMood === "bad" ? "（機嫌が悪い）" : "";
+        lines.push(`\n【本日の機嫌（VC用）】${moodLabel}${moodNote}`);
+
+        const profileEntries = Object.values(profileManager.profiles).filter(p => p.userFields?.name);
+        if (profileEntries.length > 0) {
+          const subjectList = profileEntries.map(p => {
+            const parts = [p.userFields.name];
+            if (p.userFields.tendency) parts.push(`傾向:${p.userFields.tendency}`);
+            if (p.botRecord?.observation) parts.push(`評価:${p.botRecord.observation}`);
+            return parts.join("、");
+          }).join("\n");
+          const prompt =
+            `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、以下の被検体たちについて全体的な総評を3文以内で述べよ。` +
+            `研究者として淡々と、感情を抑えた言葉で。地の文不要。\n\n${subjectList}`;
+          const assessment = await aiHandler.generateSimple(prompt, 200).catch(() => null);
+          lines.push(`\n【被検体総評】\n${assessment ?? "……データ不足だ。"}`);
+        } else {
+          lines.push("\n【被検体総評】\n……登録された被検体がいない。");
+        }
       }
 
       await message.reply(lines.join("\n"));
@@ -2020,7 +2079,7 @@ client.on("messageCreate", async (message) => {
         "!kanshi [VC名]                  … VCに召喚\n" +
         "!hakase [msg]                   … VCで音声再生\n" +
         "!owari                          … VCから退出\n" +
-        "!status                         … 現在の機嫌・VC状態を確認\n" +
+        "!status                         … 現在の状態（機嫌・やること・空腹度等）を確認\n" +
         "!help                           … このヘルプを表示\n\n" +
         "【管理者のみ】\n" +
         "!resetall                       … 全ユーザーの会話履歴をリセット\n" +
@@ -2100,7 +2159,9 @@ client.on("messageCreate", async (message) => {
       message.react("👀").catch(() => {});
     }
 
-    const systemHint = [loreHint, profileHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
+    const statusHint = statusManager.getHint();
+
+    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {

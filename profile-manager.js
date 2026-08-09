@@ -146,6 +146,15 @@ class ProfileManager {
     return Math.max(0, Math.floor((now - first) / (1000 * 60 * 60 * 24)));
   }
 
+  // 連続日数ボーナス等、通常の発言回数以外の要因による関係進展の底上げ
+  // （表示上の「観測回数」は改変せず、馴染み度・関係進展段階の算出にのみ加算する）
+  addBonusCount(userId, amount) {
+    const p = this.profiles[userId];
+    if (!p) return;
+    p.botRecord.bonusCount = (p.botRecord.bonusCount || 0) + amount;
+    this.save();
+  }
+
   onSurvival(userId) {
     const p = this.profiles[userId];
     if (p) { p.botRecord.survivalCount++; this.save(); }
@@ -220,16 +229,9 @@ class ProfileManager {
 
     lines.push("\n── 記入コマンド ──");
     lines.push("`!profile set 呼び名 [名前]`");
-    lines.push("`!profile set 年齢 [未成年 or 成人済み]`");
-    lines.push("`!profile set 性別 [性別・代名詞]`");
-    lines.push("`!profile set 趣味 [趣味・好きなこと]`");
-    lines.push("`!profile set 症状 [現在の不調・状態]`");
-    lines.push("`!profile set 傾向 [性格・行動パターン]`");
-    lines.push("`!profile set 弱点 [苦手・気にしていること]`");
     lines.push("`!profile set 備考 [自由メモ]`");
-    lines.push("`!profile clear [フィールド名]` … 特定フィールドを消去");
-    lines.push("`!profile reset` … 記入欄をすべてリセット");
-    lines.push("\n※プロフィールチャンネルに投稿すると自動で登録されます。");
+    lines.push("\n※年齢・性別・趣味・症状・傾向・弱点は、プロフィールチャンネルへの投稿でのみ登録されます。");
+    lines.push("　（例: `年齢：成人済み` のように1行ずつ書いて投稿してください）");
 
     return lines.join("\n");
   }
@@ -266,7 +268,8 @@ class ProfileManager {
       : "";
 
     // 馴染み度に応じた「予測通りの対応を試す」実験的態度のヒント（優しさではなく観察行為として）
-    const count = p.botRecord.messageCount;
+    // bonusCount は連続日数ボーナス等、発言回数以外の要因で加算される（表示上の観測回数とは別枠）
+    const count = p.botRecord.messageCount + (p.botRecord.bonusCount || 0);
     const familiarityHint = count >= 300
       ? `この被検体は長期にわたり観測してきた対象だ（発言${count}回）。ごく稀に、要求通りの言葉・行動をあえてそのまま返し、相手の反応を観察する「予測通りの対応をした場合どうなるか」という実験を行ってよい。迎合ではなく観察者としての選択として扱うこと。頻発させず、通常は従来通り拒否・はぐらかしを基本とする。`
       : count >= 100

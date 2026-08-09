@@ -40,7 +40,8 @@ module.exports = {
         MEMORIES_FILE: "user-memories-pantalone.json",
         KB_FILE: "knowledge-base-pantalone.json",
         MESSAGES_FILE: "messages-pantalone.json",
-        USER_HINTS_FILE: "user-hints-pantalone.json"
+        USER_HINTS_FILE: "user-hints-pantalone.json",
+        STATUS_FILE: "bot-status-pantalone.json"
       },
       restart_delay: 5000,
       max_restarts: 10
