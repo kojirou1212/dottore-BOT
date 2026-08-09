@@ -2047,8 +2047,16 @@ client.on("messageCreate", async (message) => {
 
         let processed = 0;
         for (const msg of userMessages) {
-          // 既に🔬リアクション済みならスキップ
-          const alreadyDone = msg.reactions.cache.get("🔬") != null;
+          // 既に「このBOT自身」が🔬リアクション済みならスキップ。
+          // 同じプロフィールチャンネルをドットーレ・パンタローネ双方が監視しているため、
+          // 単にリアクションの有無だけで判定すると、他方のBOTが先に処理済みの投稿を
+          // 誤ってスキップしてしまう（＝自分側のデータには一度も登録されない）。
+          const reaction = msg.reactions.cache.get("🔬");
+          let alreadyDone = false;
+          if (reaction) {
+            const reactedUsers = await reaction.users.fetch();
+            alreadyDone = reactedUsers.has(client.user.id);
+          }
           if (alreadyDone) continue;
           await handleProfilePost(msg);
           processed++;
