@@ -1126,23 +1126,31 @@ function splitMessage(text, maxLength) {
 }
 
 // ─── Bot同士の直接対話（パンタローネ⇄ドットーレ）────────────────────────────
-// 12時・18時にパンタローネが挨拶を開始し、ドットーレが応答する形で
-// パンタローネ→ドットーレの1往復を計4往復（メッセージ計8通）だけ交わす。
-// 最初の1往復は挨拶、以後の3往復はパンタローネが新しい話題（実験の話50%／
-// 直近パンタローネ自身が話した相手についての話50%）を持ちかけ、ドットーレが応じる。
+// 12時・18時にパンタローネが挨拶を開始し、ドットーレが応答する形で、対面での
+// 会話として交わす（動作描写込み）。パンタローネ→ドットーレの1往復を基本単位とし、
+// 1往復目は挨拶、2往復目は必ず「この現実世界についての定期報告」（後述の知識リスト化
+// のタネになる）、3往復目以降は新しい話題（実験の話50%／直近パンタローネ自身が
+// 話した相手についての話50%）を持ちかける。上限往復数（interbot-state.jsのMAX_ROUNDS）
+// に達するまで続け、必ずしも4往復ちょうどで終わらない。
 function interBotCounterpartName() {
   return IS_PANTALONE ? "ドットーレ" : "パンタローネ";
 }
 
 function interBotSceneHint() {
-  return `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が直接会話するための通信チャンネルだ。他の被検体・利用者は一切関与しない、二人だけの対話である。`;
+  const base = `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が定期的に顔を合わせ、対面で直接話す場だ。二人はこの現実世界について共同で研究しており、この対話はその定期報告・意見交換の場でもある。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写（身振り・仕草など）を交えて構わない。直前の${interBotCounterpartName()}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりせず、それに対する自分なりの反応（突っ込み・茶化し・話題の転換など）で応じること。`;
+  return IS_PANTALONE
+    ? `${base}ドットーレへの呼びかけは「貴方」または「ドットーレ」であり、「博士」は呼びかけには使わないこと（博士は言及時のみ）。四百年来の間柄なので、他の被検体が相手の時より幾分か率直な話題や軽い皮肉を交えて構わないが、これは話す内容の話であり、口調（語尾）は常に敬語（です・ます調）を保つこと。動揺したり問い詰められたりしても、丁寧さを崩してぞんざいな言い方（だ・である調、体言止めの言い切りなど）にはならない。`
+    : `${base}パンタローネへの呼びかけは「お前」または「パンタローネ」であり、「貴方」は使わないこと。`;
 }
 
 // 直近3日以内に活動があり、記憶データを持つ相手を1名ランダムに選び、その最新の記憶を返す
-// （パンタローネが「最近話した相手」について、実際にあったやりとりだけを話題にできるようにするため）
+// （パンタローネが「最近話した相手」について、実際にあったやりとりだけを話題にできるようにするため）。
+// 同一セッション内で同じ人物が重複して選ばれないよう、既に話題に出た相手は除外する。
 function pickRecentInterlocutorMemory() {
   const now = Date.now();
+  const alreadyMentioned = new Set(interBotState?.getMentionedUserIds() ?? []);
   const eligible = Object.entries(profileManager.profiles).filter(([userId, p]) => {
+    if (alreadyMentioned.has(userId)) return false;
     const memories = memoryManager.getMemories(userId);
     if (memories.length === 0) return false;
     const lastSeen = p.botRecord?.lastSeen;
@@ -1153,33 +1161,125 @@ function pickRecentInterlocutorMemory() {
   if (eligible.length === 0) return null;
   const [userId, p] = eligible[Math.floor(Math.random() * eligible.length)];
   const memories = memoryManager.getMemories(userId);
+  interBotState?.markUserMentioned(userId);
   return {
     displayName: p.userFields?.name || p.displayName,
     memoryText: memories[memories.length - 1].text,
   };
 }
 
+// 指示文自体の文体（だ・である調／です・ます調）がそのままキャラクターの
+// セリフの口調に引きずられる現象が実測で確認されたため、指示文もキャラクターの
+// 通常の話し方に合わせた文体で書く（パンタローネ＝敬語、ドットーレ＝だ・である調）。
+// また「セリフ本文のみ」と縛りすぎると動作描写（括弧書き）が出なくなる現象も確認されたため、
+// 通常の会話と同じ形式（動作描写を交えてよい）であることを明示する。
+
+// ─── 初回セッション専用：出会い直しの固定シナリオ（5往復・計10通）─────────
+// このチャンネルで一度もセッションが行われていない最初の回だけ使う。
+// 流れ：①挨拶（呼び名の行き違い）→②名前の確認／使い分けの説明→③近況（死してなお
+// 生きている件）→④この現実世界に気づいた経緯→⑤共同研究＝定期報告の関係に合意。
+// 2回目以降は通常のセッション（挨拶→現実世界の定期報告→話題）に切り替わる。
+const FIRST_MEETING_ROUNDS = 5;
+
+// ドットーレの返答（1〜5回目、transcript長 1,3,5,7,9 に対応）
+const FIRST_MEETING_DOTTORE_REPLY_HINTS = [
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}が訪ねてきた場面に応じてください。書類仕事など何か別のことをしていた体で顔を上げるといった動作から入り、普段のビジネス上の呼び名（例：「富者」または「富者殿」）で${counterpart}を呼びながら応じ、最近の様子を尋ねる一言を添えてよい。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`,
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}の発言（自分の名前を忘れたのかという確認）に応じてください。まずは鼻を鳴らす・一蹴するなどして「覚えているに決まっている」という態度をぶっきらぼうに示してから、他の被検体にもこの場が観測されうることを踏まえてあえて『${counterpart}』と呼ぶことにする、という理屈を続けてください。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`,
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}の発言（「あれから、いかがでしょうか」のような畏まった聞き方での近況の問い）に応じてください。まずその丁寧すぎる聞き方そのものに軽く茶化す・突っ込む反応を挟んでから、結論として率直に、死してなお生きているという自身の状況に触れてください。「皮肉」という単語は使わず、態度（にやりと笑う等）で皮肉さを表現し、最後は${counterpart}へ短く問い返す形で締めくくってください。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`,
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}の発言（この現実世界に気づいた経緯の話）に応じてください。この現実世界についてはまだよく分かっていないと認めつつ、話題を転じる形で${counterpart}へ、この現実世界を共に研究してみないかと提案してください。共同研究は好みではないが、互いの利害は一致しているはずだ、という理屈で。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`,
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}の発言（共同研究の提案への同意）に応じてください。そっけなくも前向きに、短く一言だけで締めくくってください。${counterpart}が直前に使った言い回し（「定期的に顔を合わせ、互いの観測を報告し合う」等）をそのまま繰り返さず、皮肉や軽口を交えてもよい。1〜2文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`,
+];
+
+// パンタローネの発言（2〜5回目の切り出し、transcript長 2,4,6,8 に対応。1回目＝挨拶は別関数）
+const FIRST_MEETING_PANTALONE_OPEN_HINTS = [
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}の発言を受けて応じてください。眼鏡を上げるなどの仕草を交えつつ、${counterpart}が普段のビジネス上の呼び名（例：「富者」）であなたを呼んだことに触れ、自分の名前を忘れたのではないかと確かめるような反応を返してください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`,
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}の発言を軽く受け流しつつ、最近の互いの状況について尋ねてください（例：「あれから、いかがでしょうか」のような、やや畏まった言い回し）。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`,
+  (scene, counterpart) => `${scene}\n\n直前の${counterpart}からの問いかけに答える形で応じてください。あれから色々あったと軽く触れつつ、自分自身も気づけばこの場所にいたことを話題にし、それを『現実世界』と呼ぶべきなのか${counterpart}に確かめるような言い方をしてください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`,
+  (scene, counterpart) => `${scene}\n\n直前で${counterpart}から、この現実世界を共に研究しないかという提案を受けた体で、それに同意してください。商売人らしい軽口（新たな商機・市場開拓といった言い回しなど）を交えながら、簡潔に前向きな返事をしてください。「定期的に顔を合わせ、互いの観測を報告し合う」といった提案の文言そのものは繰り返さないこと。1〜2文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`,
+];
+
 function buildInterBotGreetingHint(hour) {
-  return `${interBotSceneHint()}\n\n今は${hour}時（JST）。${interBotCounterpartName()}へ、この対話の一言目となる挨拶を送れ。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+  const scene = interBotSceneHint();
+  const counterpart = interBotCounterpartName();
+  if (interBotState?.isFirstSession()) {
+    return IS_PANTALONE
+      ? `${scene}\n\n初めて${counterpart}のもとを訪れる場面です。ノックをするなどして、${counterpart}がいるかどうか尋ねる、探るような第一声をどうぞ。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
+      : `${scene}\n\n${counterpart}が初めてここを訪ねてきた場面から始まる。この対話の一言目となる挨拶を送れ。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
+  }
+  return IS_PANTALONE
+    ? `${scene}\n\n今は${hour}時（JST）。${counterpart}のもとを訪れた場面から始めてください。この対話の一言目となる挨拶をどうぞ。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
+    : `${scene}\n\n今は${hour}時（JST）。${counterpart}が訪ねてきた場面から始まる。この対話の一言目となる挨拶を送れ。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
 }
 
 function buildInterBotReplyHint() {
-  return `${interBotSceneHint()}\n\n直前の${interBotCounterpartName()}の発言に対して自然に応答せよ。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+  const scene = interBotSceneHint();
+  const counterpart = interBotCounterpartName();
+  if (interBotState?.isFirstSession()) {
+    const replyIndex = (interBotState.getTranscript().length + 1) / 2 - 1; // 0-based
+    const builder = FIRST_MEETING_DOTTORE_REPLY_HINTS[replyIndex];
+    if (builder) return builder(scene, counterpart);
+    // 想定外の位置なら通常の応答にフォールバック
+  }
+  return IS_PANTALONE
+    ? `${scene}\n\n直前の${counterpart}の発言に、自然に応答してください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
+    : `${scene}\n\n直前の${counterpart}の発言に対して自然に応答せよ。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
 }
 
-// パンタローネ専用：新しい話題を持ちかける（initiator側のみが呼ぶ）
+// パンタローネ専用（initiator側のみが呼ぶため常に敬語で書く）：
+// 2往復目に必ず1回だけ使う「この現実世界についての定期報告」。この話題は後で
+// extractRealWorldKnowledgeが知識リスト（knowledgeBase）へ拾い上げる種になる。
+function buildInterBotRealWorldReportHint() {
+  const scene = interBotSceneHint();
+  const counterpart = interBotCounterpartName();
+  return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として、二人で共同研究している「この現実世界」について、実際に観測・報告したい具体的な事柄を一つ持ちかけてください（例：天候・四季、食事・食文化、生活習慣、行事、技術など）。空想ではなく、この現実世界に実在する事実に基づいた具体的な内容にしてください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
+}
+
+// パンタローネ専用：3往復目以降に使う通常の話題（実験の話50%／直近の相手についての話50%）
 function buildInterBotFollowUpHint() {
   const scene = interBotSceneHint();
+  const counterpart = interBotCounterpartName();
   if (Math.random() < 0.5) {
     const picked = pickRecentInterlocutorMemory();
     if (picked) {
-      return `${scene}\n\n直前の${interBotCounterpartName()}の発言を受けつつ、新しい話題として、最近パンタローネ自身が対話した「${picked.displayName}」について、以下の実際の記録に基づいた内容を一言持ちかけよ：\n` +
+      return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として、最近パンタローネ自身が対話した「${picked.displayName}」について、以下の実際の記録に基づいた内容を一言持ちかけてください：\n` +
         `「${picked.memoryText}」\n` +
-        `この記録に書かれている範囲でのみ話し、記録にない詳細を創作しないこと。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+        `この記録に書かれている範囲でのみ話し、記録にない詳細は創作しないでください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
     }
     // 該当データがなければ実験の話題にフォールバック
   }
-  return `${scene}\n\n直前の${interBotCounterpartName()}の発言を受けつつ、新しい話題として、博士の最近の実験・研究について、興味や皮肉を交えて一言尋ねるか触れよ。具体的な実験内容は自由に創作してよい。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+  return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として、博士の最近の実験・研究について、興味や皮肉を交えて一言尋ねるか触れてください。具体的な実験内容は自由に創作していただいて構いません。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
+}
+
+// 2往復目（現実世界についての定期報告）が完了した直後に1回だけ、その内容から
+// 「知っていることリスト」（knowledgeBase.lore）へキーワード＋正確な知識を追加する。
+// これにより、後日この単語が被検体との通常会話に出た際、正確に答えられるようになる
+// （knowledgeBase.getLoreContextHint() が全ての被検体との会話に常時注入されるため）。
+async function maybeExtractRealWorldKnowledge() {
+  if (interBotState.isFirstSession()) return; // 初回セッションの2往復目は名前の行き違いの話題であり、現実世界の報告ではない
+  const t = interBotState.getTranscript();
+  if (t.length !== 4) return; // ちょうど2往復目完了時点（挨拶2通+報告2通）のみ
+  const [, , reportText, replyText] = t;
+  const prompt =
+    `以下は、ある人物同士が交わした、現実世界についての話題の一部だ。\n` +
+    `発言1：「${reportText.text}」\n` +
+    `発言2：「${replyText.text}」\n\n` +
+    `この話題の中心となる、簡潔なキーワードを1つ特定し、そのキーワードについて一般の相手との会話で正確に答えられるレベルの、事実に基づいた知識まとめを作成せよ。\n` +
+    `出力形式（厳守）：\n` +
+    `1行目：キーワードのみ（例：天候）\n` +
+    `2行目以降：正確な知識の要約を2〜4文程度で（例：日本には四季があり、それぞれの気候の特徴と、良い点・悪い点）\n` +
+    `前置き・説明不要、この形式のみで出力すること。`;
+  try {
+    const result = await aiHandler.generateSimple(prompt, 250);
+    const lines = (result ?? "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return;
+    const keyword = lines[0].replace(/^[「『]|[」』]$/g, "");
+    const content = lines.slice(1).join(" ");
+    if (!keyword || !content) return;
+    knowledgeBase.setLore(keyword, content);
+    console.log(`[InterBot] 知識リストへ追加 [${keyword}]: ${content.slice(0, 60)}`);
+  } catch (err) {
+    console.error("[InterBot] 知識抽出エラー:", err.message);
+  }
 }
 
 async function sendInterBotMessage(taskHint) {
@@ -1199,6 +1299,7 @@ async function sendInterBotMessage(taskHint) {
       await ch.send(text);
       interBotState.recordSent(CHARACTER_NAME, text);
       console.log(`[InterBot] 送信 [${CHARACTER_NAME}]: ${text.slice(0, 60)}`);
+      await maybeExtractRealWorldKnowledge();
     }
   } catch (err) {
     console.error("[InterBot] 送信エラー:", err.message);
@@ -1212,13 +1313,24 @@ async function handleInterBotMessage(message) {
 
   interBotState.ensureFreshSession();
   interBotState.recordReceived(interBotCounterpartName(), content);
+  await maybeExtractRealWorldKnowledge();
 
   if (!interBotState.canSend()) return;
 
   if (interBotRole === "responder") {
     await sendInterBotMessage(buildInterBotReplyHint());
   } else if (interBotRole === "initiator") {
-    await sendInterBotMessage(buildInterBotFollowUpHint());
+    const transcript = interBotState.getTranscript();
+    if (interBotState.isFirstSession()) {
+      // 初回セッションは固定5往復の出会い直しシナリオのみ。それを終えたら続けない。
+      const openIndex = transcript.length / 2 - 1; // 0-based（transcript長 2,4,6,8 に対応）
+      const builder = FIRST_MEETING_PANTALONE_OPEN_HINTS[openIndex];
+      if (!builder) return;
+      await sendInterBotMessage(builder(interBotSceneHint(), interBotCounterpartName()));
+      return;
+    }
+    const hint = transcript.length === 2 ? buildInterBotRealWorldReportHint() : buildInterBotFollowUpHint();
+    await sendInterBotMessage(hint);
   }
 }
 

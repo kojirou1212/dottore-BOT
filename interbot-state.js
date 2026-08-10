@@ -12,10 +12,17 @@ const STATE_PATH = process.env.INTERBOT_STATE_FILE
 // この時間以上、送受信が無ければ「別セッション」とみなし送信回数をリセットする
 const SESSION_GAP_MS = 60 * 60 * 1000;
 
-const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [] });
+// このBot自身が1セッションで送信してよい上限（＝往復数の上限）。
+// 両Botとも同じ定数を参照することで、別プロセス・別状態ファイルでも終了タイミングが揃う。
+const MAX_ROUNDS = 6;
+
+const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false });
 
 class InterBotState {
   constructor() {
+    // everMet はセッションをまたいで永続する（startSession/ensureFreshSessionでリセットされない）。
+    // 「初回セッションかどうか」の唯一の判定材料。
+    this.everMet = false;
     this.state = EMPTY_STATE();
     this.load();
   }
@@ -23,7 +30,9 @@ class InterBotState {
   load() {
     try {
       if (fs.existsSync(STATE_PATH)) {
-        this.state = { ...EMPTY_STATE(), ...JSON.parse(fs.readFileSync(STATE_PATH, "utf-8")) };
+        const raw = JSON.parse(fs.readFileSync(STATE_PATH, "utf-8"));
+        this.everMet = raw.everMet ?? false;
+        this.state = { ...EMPTY_STATE(), ...(raw.state ?? {}) };
       }
     } catch (err) {
       console.error("[InterBot] 状態読み込み失敗:", err.message);
@@ -32,33 +41,56 @@ class InterBotState {
 
   save() {
     try {
-      fs.writeFileSync(STATE_PATH, JSON.stringify(this.state, null, 2), "utf-8");
+      fs.writeFileSync(STATE_PATH, JSON.stringify({ everMet: this.everMet, state: this.state }, null, 2), "utf-8");
     } catch (err) {
       console.error("[InterBot] 状態保存失敗:", err.message);
     }
   }
 
+  _beginSession() {
+    const isFirstSession = !this.everMet;
+    this.state = EMPTY_STATE();
+    this.state.isFirstSession = isFirstSession;
+    this.state.lastActivityAt = Date.now();
+    this.everMet = true;
+    this.save();
+  }
+
   // 定時トリガーによる新規セッション開始時に呼ぶ（強制リセット）
   startSession() {
-    this.state = EMPTY_STATE();
-    this.state.lastActivityAt = Date.now();
-    this.save();
+    this._beginSession();
   }
 
   // 相手からのメッセージ受信時、処理前に呼ぶ。間隔が空きすぎていれば別セッションとみなす。
   ensureFreshSession() {
     if (!this.state.lastActivityAt || Date.now() - this.state.lastActivityAt > SESSION_GAP_MS) {
-      this.state = EMPTY_STATE();
+      this._beginSession();
     }
   }
 
-  // このBot自身が、今回のセッションであと送信してよいか（計4往復＝自分の送信は4回まで）
+  // 今回のセッションが、このチャンネルでの初回の顔合わせかどうか
+  isFirstSession() {
+    return this.state.isFirstSession === true;
+  }
+
+  // このBot自身が、今回のセッションであと送信してよいか
   canSend() {
-    return this.state.sentCount < 4;
+    return this.state.sentCount < MAX_ROUNDS;
   }
 
   getTranscript() {
     return this.state.transcript;
+  }
+
+  // 「直近の相手についての話題」で、同一セッション内に同じ人物が重複して選ばれるのを防ぐ
+  getMentionedUserIds() {
+    return this.state.mentionedUserIds ?? [];
+  }
+
+  markUserMentioned(userId) {
+    if (!this.state.mentionedUserIds) this.state.mentionedUserIds = [];
+    if (!this.state.mentionedUserIds.includes(userId)) this.state.mentionedUserIds.push(userId);
+    this.save();
   }
 
   recordReceived(speaker, text) {
