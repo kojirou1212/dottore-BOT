@@ -216,8 +216,13 @@ class ProfileManager {
     lines.push(`最終観測: ${p.botRecord.lastSeen}`);
 
     lines.push(isPantalone ? "\n【ご記入欄】" : "\n【被検体記入欄】");
-    for (const [field, label] of Object.entries(FIELD_LABELS)) {
-      lines.push(`${label}: ${p.userFields[field] ?? "未記入"}`);
+    const filledFields = Object.entries(FIELD_LABELS).filter(([field]) => p.userFields[field]);
+    if (filledFields.length === 0) {
+      lines.push(isPantalone ? "……まだ、ご記入いただいておりません。" : "……まだ何も記入されていない。");
+    } else {
+      for (const [field, label] of filledFields) {
+        lines.push(`${label}: ${p.userFields[field]}`);
+      }
     }
 
     lines.push(`\n【観察記録（${this.characterName}記入）】`);
