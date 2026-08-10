@@ -337,7 +337,15 @@ function parseProfileTemplate(content) {
   return result;
 }
 
-async function handleProfilePost(message) {
+// 被検体登録テンプレート（名前・年齢・性別／代名詞・趣味・一言メッセージ）の
+// 5項目すべてが揃っているかを判定する。!scan_profiles は雑談や単発のお礼メッセージまで
+// 拾ってしまわないよう、このテンプレートに沿った投稿のみを対象にする。
+function isCompleteProfileTemplate(content) {
+  const parsed = parseProfileTemplate(content);
+  return Boolean(parsed.name && parsed.age && parsed.gender && parsed.hobby && parsed.memo);
+}
+
+async function handleProfilePost(message, { silent = false } = {}) {
   const userId = message.author.id;
   const userTag = message.author.tag;
   const content = message.content.trim();
@@ -366,31 +374,33 @@ async function handleProfilePost(message) {
 
   try { await message.react("🔬"); } catch (_) {}
 
-  const PROFILE_REG_REPLIES = {
-    "ドットーレ": [
-      "……データを受け取った。記録する。",
-      "登録を確認した。被検体として管理下に置く。",
-      "……ふん。一応、記録しておこう。",
-      "被検体よ、情報を受領した。引き続き観察する。",
-      "……記録完了。これで管理対象だ。",
-      "データ、確認した。期待はしていないが、参考にしよう。",
-      "……登録を認める。以後、観察を続ける。",
-    ],
-    "パンタローネ": [
-      "……ご登録、確かに拝見いたしました。貴重な情報、頂戴しております。",
-      "登録、確認いたしました。今後ともお付き合いのほど、よろしくお願いいたします。",
-      "なるほど……。よい対価をいただきました。",
-      "情報、確かに受け取りました。……悪くない取引です。",
-      "……登録、確認いたしました。今後の対話を楽しみにしております。",
-      "拝見いたしました。まずまず、といったところでしょうか。",
-      "……ご登録、ありがとうございます。これも一つの、大切な情報として。",
-    ],
-  };
-  try {
-    const replyList = PROFILE_REG_REPLIES[CHARACTER_NAME] ?? PROFILE_REG_REPLIES["ドットーレ"];
-    const reply = replyList[Math.floor(Math.random() * replyList.length)];
-    await message.reply(reply);
-  } catch (_) {}
+  if (!silent) {
+    const PROFILE_REG_REPLIES = {
+      "ドットーレ": [
+        "……データを受け取った。記録する。",
+        "登録を確認した。被検体として管理下に置く。",
+        "……ふん。一応、記録しておこう。",
+        "被検体よ、情報を受領した。引き続き観察する。",
+        "……記録完了。これで管理対象だ。",
+        "データ、確認した。期待はしていないが、参考にしよう。",
+        "……登録を認める。以後、観察を続ける。",
+      ],
+      "パンタローネ": [
+        "……ご登録、確かに拝見いたしました。貴重な情報、頂戴しております。",
+        "登録、確認いたしました。今後ともお付き合いのほど、よろしくお願いいたします。",
+        "なるほど……。よい対価をいただきました。",
+        "情報、確かに受け取りました。……悪くない取引です。",
+        "……登録、確認いたしました。今後の対話を楽しみにしております。",
+        "拝見いたしました。まずまず、といったところでしょうか。",
+        "……ご登録、ありがとうございます。これも一つの、大切な情報として。",
+      ],
+    };
+    try {
+      const replyList = PROFILE_REG_REPLIES[CHARACTER_NAME] ?? PROFILE_REG_REPLIES["ドットーレ"];
+      const reply = replyList[Math.floor(Math.random() * replyList.length)];
+      await message.reply(reply);
+    } catch (_) {}
+  }
 
   // 被検体ロール付与
   try {
@@ -2042,8 +2052,20 @@ client.on("messageCreate", async (message) => {
       }
       try {
         const profileCh = await client.channels.fetch(profileChId);
-        const fetched = await profileCh.messages.fetch({ limit: 100 });
-        const userMessages = [...fetched.values()].filter(m => !m.author.bot);
+
+        // limit:100 は1回のfetchにおけるDiscord APIの上限。
+        // チャンネルの投稿数がそれを超えると古い投稿がスキャン対象から漏れ、
+        // 該当ユーザーの記入欄がいつまでも未記入のままになるため、
+        // beforeカーソルで全履歴をページングして取得する。
+        const userMessages = [];
+        let before;
+        for (;;) {
+          const page = await profileCh.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+          if (page.size === 0) break;
+          userMessages.push(...[...page.values()].filter(m => !m.author.bot && isCompleteProfileTemplate(m.content)));
+          before = page.last().id;
+          if (page.size < 100) break;
+        }
 
         let processed = 0;
         for (const msg of userMessages) {
@@ -2058,7 +2080,7 @@ client.on("messageCreate", async (message) => {
             alreadyDone = reactedUsers.has(client.user.id);
           }
           if (alreadyDone) continue;
-          await handleProfilePost(msg);
+          await handleProfilePost(msg, { silent: true });
           processed++;
           await new Promise(r => setTimeout(r, 800));
         }
