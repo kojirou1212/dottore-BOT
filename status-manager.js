@@ -30,7 +30,7 @@ const BEDTIME_HOUR = {
 // type はストレス・集中度の増減方向づけに使う（labor=仕事寄りで上がる、rest=休息寄りで下がる）。
 // hours はランダム選定の対象になり得る時間帯（ACTIVITY_TICK_HOURSのサブセット）。
 // auto:true の項目（睡眠中・朝食中/昼食中/夕食中）はランダム抽選の対象にせず、
-// 就寝時刻・食事時刻、または体力・空腹度が0になったターンにのみ強制的に選ばれる。
+// 就寝時刻・食事時刻という完全に固定のルーティンとしてのみ選ばれる（体力・空腹度による早期発生はしない）。
 // meal: "breakfast"|"lunch"|"dinner" は、どの食事時刻に対応するかを示す。
 function buildActivityPool(characterName, laborRestList) {
   const meals = MEAL_HOURS[characterName] ?? MEAL_HOURS["ドットーレ"];
@@ -212,14 +212,15 @@ class StatusManager {
     if (Math.random() < 0.35) s.mood = clamp(s.mood + (Math.random() < 0.5 ? -1 : 1), 0, 2);
     if (Math.random() < 0.35) s.emotion = pick(this.emotions.filter(e => e !== s.emotion));
 
-    // 就寝：就寝時刻（上限）に達したら体力に関わらず強制的に寝る。それより前でも体力が0になれば寝る。
+    // 就寝：就寝時刻（固定）に達したら体力に関わらず必ず寝る、完全なルーティン。
+    // 体力が0になっても就寝時刻でなければ寝ない（ランダム/突発的な就寝はしない）。
     const isBedtime = hour === this.bedtimeHour;
-    const slept = isBedtime || s.stamina <= 0;
+    const slept = isBedtime;
 
-    // 食事：朝食・昼食・夕食の時刻は空腹度に関わらず必ず食事を取る（ルーティン）。
-    // それ以外の時刻は、空腹度が0になった場合のみ突発的に食事する。就寝が最優先。
+    // 食事：朝食・昼食・夕食の時刻は空腹度に関わらず必ず食事を取る、完全なルーティン。
+    // それ以外の時刻では、空腹度が0になっても食事は発生しない（ランダム/突発的な食事はしない）。
     const mealEntry = this.activities.find(a => a.meal && a.hours[0] === hour);
-    const ate = !slept && (mealEntry != null || s.hunger <= 0);
+    const ate = !slept && mealEntry != null;
 
     s.hunger = ate ? randInt(7, 10) : clamp(s.hunger - randInt(2, 4), 0, 10);
     s.stamina = slept ? randInt(7, 10) : clamp(s.stamina - randInt(2, 4), 0, 10);

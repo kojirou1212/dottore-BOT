@@ -229,16 +229,25 @@ async function updateObservation(userId, userMessage, aiReply) {
   const profile = profileManager.profiles[userId];
   if (!profile) return;
   const existing = profile.botRecord.observation ?? "（未記録）";
+  const displayName = profile.userFields?.name || profile.displayName;
 
-  const prompt =
-    `以下は研究対象との最新のやりとりだ。このデータをもとに被検体の人物像・行動傾向・特性に関する観察記録を更新せよ。\n\n` +
-    `現在の記録：「${existing}」\n` +
-    `被検体の発言：「${userMessage.slice(0, 300)}」\n` +
-    `（参考）${CHARACTER_NAME}の返答：「${aiReply.slice(0, 150)}」\n\n` +
-    `出力形式：1〜2文の観察メモのみ出力すること（説明・前置き・${CHARACTER_NAME}の台詞は不要）。` +
-    `研究者視点で淡々と記述、感情語・主観的評価禁止。` +
-    `観察可能な事実・傾向・パターンのみ（例：「深夜に出現する傾向がある」「自己否定的な発言が多い」「感情表現を避ける傾向が見られる」）。` +
-    `既存記録がある場合は統合・要約してよい。`;
+  const prompt = IS_PANTALONE
+    ? `以下は「${displayName}」さんとの最新のやりとりだ。このデータをもとに、${displayName}さんの人物像・行動傾向・特性に関する観察記録を更新せよ。\n\n` +
+      `現在の記録：「${existing}」\n` +
+      `${displayName}さんの発言：「${userMessage.slice(0, 300)}」\n` +
+      `（参考）${CHARACTER_NAME}の返答：「${aiReply.slice(0, 150)}」\n\n` +
+      `出力形式：1〜2文の観察メモのみ出力すること（説明・前置きやパンタローネの台詞は不要）。` +
+      `パンタローネ本人の記録という体で、「${displayName}さん」のように名前＋さん付けで呼び、通常のパンタローネの話し方（丁寧な敬語、です・ます調）で記述すること。「被検体」という語は使わないこと。` +
+      `観察可能な事実・傾向・パターンのみ（例：「深夜にいらっしゃる傾向がおありです」「ご自身を卑下される発言が多いようです」）。` +
+      `既存記録がある場合は統合・要約してよい。`
+    : `以下は研究対象との最新のやりとりだ。このデータをもとに被検体の人物像・行動傾向・特性に関する観察記録を更新せよ。\n\n` +
+      `現在の記録：「${existing}」\n` +
+      `被検体の発言：「${userMessage.slice(0, 300)}」\n` +
+      `（参考）${CHARACTER_NAME}の返答：「${aiReply.slice(0, 150)}」\n\n` +
+      `出力形式：1〜2文の観察メモのみ出力すること（説明・前置き・${CHARACTER_NAME}の台詞は不要）。` +
+      `研究者視点で淡々と記述、感情語・主観的評価禁止。` +
+      `観察可能な事実・傾向・パターンのみ（例：「深夜に出現する傾向がある」「自己否定的な発言が多い」「感情表現を避ける傾向が見られる」）。` +
+      `既存記録がある場合は統合・要約してよい。`;
 
   try {
     const observation = await aiHandler.generateSimple(prompt, 150);
