@@ -176,6 +176,64 @@ class AIHandler {
     }
   }
 
+  // システムプロンプト＋任意のmessages配列を渡す単発呼び出し（this.conversationHistoryは使わない・更新しない）。
+  // 呼び出し側が会話の並び（user/assistant交互）を組み立てて渡す用途向け（例：Bot同士の対話）。
+  async generateWithSystemPrompt(systemContent, messages, maxTokens = 300) {
+    const apiKey = this.config.grok.apiKey;
+    const url = "https://api.x.ai/v1/chat/completions";
+
+    const callGrok = async (model, isRetry = false) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "system", content: systemContent }, ...messages],
+            max_tokens: maxTokens,
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = data.error?.message ?? res.statusText;
+        const code = res.status;
+        if (code === 503 || code === 429) throw new Error(`${code}: ${msg}`);
+        throw new Error(`API error ${code}: ${msg}`);
+      }
+
+      const text = data.choices?.[0]?.message?.content?.trim();
+      if (!text) {
+        const finishReason = data.choices?.[0]?.finish_reason ?? "UNKNOWN";
+        if (!isRetry) return callGrok(model, true);
+        throw new Error(`AIからの応答が空でした。(finish_reason=${finishReason})`);
+      }
+      return text;
+    };
+
+    try {
+      return await this._callWithRetry(() => callGrok(this.config.grok.model));
+    } catch (primaryErr) {
+      const msg = primaryErr.message || "";
+      const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("429") || msg.includes("rate_limit");
+      const fallbackModel = this.config.grok.fallbackModel;
+      if (isUnavailable && fallbackModel) {
+        return await this._callWithRetry(() => callGrok(fallbackModel));
+      }
+      throw primaryErr;
+    }
+  }
+
   // 履歴なし・低トークンの単発呼び出し（観察メモ生成用）
   async generateSimple(prompt, maxTokens = 150) {
     const model = this.config.grok.fallbackModel || this.config.grok.model;

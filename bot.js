@@ -11,6 +11,7 @@ const KnowledgeBase = require("./knowledge-base");
 const MemoryManager = require("./memory-manager");
 const dailyStreak = require("./daily-streak");
 const StatusManager = require("./status-manager");
+const InterBotState = require("./interbot-state");
 
 // ─── 設定の読み込み（環境変数優先、なければ config.json）─────────────────
 let config;
@@ -177,6 +178,12 @@ const debugChannelId = config.discord.debugChannelId || "";
 const jihouChannelIds = new Set(config.discord.jihouChannelIds ?? []);
 const restrictedVCChannelIds = new Set(config.discord.restrictedVCChannelIds ?? []);
 const restrictedVCNotifyChannelId = config.discord.restrictedVCNotifyChannelId || "";
+
+// ─── Bot同士（パンタローネ⇄ドットーレ）の直接対話チャンネル ──────────────────
+// interBotRole: "initiator"（定時に挨拶を開始する側＝パンタローネ）/ "responder"（応答のみ＝ドットーレ）
+const interBotChannelId = config.discord.interBotChannelId || "";
+const interBotRole = config.discord.interBotRole || "";
+const interBotState = interBotChannelId ? new InterBotState() : null;
 
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
@@ -1118,6 +1125,103 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
+// ─── Bot同士の直接対話（パンタローネ⇄ドットーレ）────────────────────────────
+// 12時・18時にパンタローネが挨拶を開始し、ドットーレが応答する形で
+// パンタローネ→ドットーレの1往復を計4往復（メッセージ計8通）だけ交わす。
+// 最初の1往復は挨拶、以後の3往復はパンタローネが新しい話題（実験の話50%／
+// 直近パンタローネ自身が話した相手についての話50%）を持ちかけ、ドットーレが応じる。
+function interBotCounterpartName() {
+  return IS_PANTALONE ? "ドットーレ" : "パンタローネ";
+}
+
+function interBotSceneHint() {
+  return `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が直接会話するための通信チャンネルだ。他の被検体・利用者は一切関与しない、二人だけの対話である。`;
+}
+
+// 直近3日以内に活動があり、記憶データを持つ相手を1名ランダムに選び、その最新の記憶を返す
+// （パンタローネが「最近話した相手」について、実際にあったやりとりだけを話題にできるようにするため）
+function pickRecentInterlocutorMemory() {
+  const now = Date.now();
+  const eligible = Object.entries(profileManager.profiles).filter(([userId, p]) => {
+    const memories = memoryManager.getMemories(userId);
+    if (memories.length === 0) return false;
+    const lastSeen = p.botRecord?.lastSeen;
+    if (!lastSeen) return false;
+    const daysSinceSeen = (now - new Date(lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+    return daysSinceSeen <= 3;
+  });
+  if (eligible.length === 0) return null;
+  const [userId, p] = eligible[Math.floor(Math.random() * eligible.length)];
+  const memories = memoryManager.getMemories(userId);
+  return {
+    displayName: p.userFields?.name || p.displayName,
+    memoryText: memories[memories.length - 1].text,
+  };
+}
+
+function buildInterBotGreetingHint(hour) {
+  return `${interBotSceneHint()}\n\n今は${hour}時（JST）。${interBotCounterpartName()}へ、この対話の一言目となる挨拶を送れ。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+}
+
+function buildInterBotReplyHint() {
+  return `${interBotSceneHint()}\n\n直前の${interBotCounterpartName()}の発言に対して自然に応答せよ。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+}
+
+// パンタローネ専用：新しい話題を持ちかける（initiator側のみが呼ぶ）
+function buildInterBotFollowUpHint() {
+  const scene = interBotSceneHint();
+  if (Math.random() < 0.5) {
+    const picked = pickRecentInterlocutorMemory();
+    if (picked) {
+      return `${scene}\n\n直前の${interBotCounterpartName()}の発言を受けつつ、新しい話題として、最近パンタローネ自身が対話した「${picked.displayName}」について、以下の実際の記録に基づいた内容を一言持ちかけよ：\n` +
+        `「${picked.memoryText}」\n` +
+        `この記録に書かれている範囲でのみ話し、記録にない詳細を創作しないこと。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+    }
+    // 該当データがなければ実験の話題にフォールバック
+  }
+  return `${scene}\n\n直前の${interBotCounterpartName()}の発言を受けつつ、新しい話題として、博士の最近の実験・研究について、興味や皮肉を交えて一言尋ねるか触れよ。具体的な実験内容は自由に創作してよい。1〜3文程度。前置き・説明不要、セリフ本文のみ出力すること。`;
+}
+
+async function sendInterBotMessage(taskHint) {
+  if (!interBotState) return;
+  try {
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    const systemContent = `${config.ai.systemPrompt}\n\n現在の日時：${now}\n\n${statusManager.getHint()}\n\n${taskHint}`;
+    const transcript = interBotState.getTranscript();
+    const messages = transcript.length > 0
+      ? transcript.map(t => ({ role: t.speaker === CHARACTER_NAME ? "assistant" : "user", content: t.text }))
+      : [{ role: "user", content: "（このセッションを開始せよ）" }];
+
+    const text = await aiHandler.generateWithSystemPrompt(systemContent, messages, 250);
+    if (!text) return;
+    const ch = await client.channels.fetch(interBotChannelId);
+    if (ch && ch.isTextBased()) {
+      await ch.send(text);
+      interBotState.recordSent(CHARACTER_NAME, text);
+      console.log(`[InterBot] 送信 [${CHARACTER_NAME}]: ${text.slice(0, 60)}`);
+    }
+  } catch (err) {
+    console.error("[InterBot] 送信エラー:", err.message);
+  }
+}
+
+async function handleInterBotMessage(message) {
+  if (!interBotState) return;
+  const content = message.content.trim();
+  if (!content) return;
+
+  interBotState.ensureFreshSession();
+  interBotState.recordReceived(interBotCounterpartName(), content);
+
+  if (!interBotState.canSend()) return;
+
+  if (interBotRole === "responder") {
+    await sendInterBotMessage(buildInterBotReplyHint());
+  } else if (interBotRole === "initiator") {
+    await sendInterBotMessage(buildInterBotFollowUpHint());
+  }
+}
+
 // ─── 定時スケジューラー ───────────────────────────────────────────────────
 function startScheduler() {
   if (BOT_MODE === "vc") {
@@ -1146,6 +1250,14 @@ function startScheduler() {
     if (statusManager.tickHours.includes(hour)) {
       statusManager.tick(hour);
       console.log(`[Scheduler] ステータス更新 (${hour}時 JST): ${statusManager.state.activity}`);
+    }
+
+    // ── Bot同士の対話セッション開始（initiator側のみ・12時/18時）──
+    if (interBotState && interBotRole === "initiator" && (hour === 12 || hour === 18)) {
+      interBotState.startSession();
+      console.log(`[InterBot] セッション開始 (${hour}時 JST)`);
+      sendInterBotMessage(buildInterBotGreetingHint(hour))
+        .catch(err => console.error("[InterBot] 挨拶送信エラー:", err.message));
     }
 
     // ── AI生成の朝メッセージ（config.discord.aiJihouChannelId が設定された時間に送信）──
@@ -1573,6 +1685,15 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 
 // ─── メッセージ受信 ────────────────────────────────────────────────────────
 client.on("messageCreate", async (message) => {
+  // パンタローネ⇄ドットーレの直接対話チャンネル：相手Botのメッセージにのみ反応する特殊チャンネル
+  // （通常はBot自身のメッセージを一律無視するため、この分岐だけ下のbotフィルターより先に処理する。
+  // 人間の発言はここでは処理せず、!say-d/!say-p 等の通常経路にそのまま流す）。
+  if (interBotChannelId && message.channelId === interBotChannelId && message.author.bot) {
+    if (message.author.id !== client.user.id) {
+      await handleInterBotMessage(message).catch(err => console.error("[InterBot] 処理エラー:", err.message));
+    }
+    return;
+  }
   if (message.author.bot) return;
 
   // !say-d / !say-p はどのチャンネルからでも管理者が使用可能。

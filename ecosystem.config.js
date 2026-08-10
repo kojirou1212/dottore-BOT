@@ -41,7 +41,8 @@ module.exports = {
         KB_FILE: "knowledge-base-pantalone.json",
         MESSAGES_FILE: "messages-pantalone.json",
         USER_HINTS_FILE: "user-hints-pantalone.json",
-        STATUS_FILE: "bot-status-pantalone.json"
+        STATUS_FILE: "bot-status-pantalone.json",
+        INTERBOT_STATE_FILE: "interbot-state-pantalone.json"
       },
       restart_delay: 5000,
       max_restarts: 10
