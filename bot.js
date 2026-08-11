@@ -1294,7 +1294,13 @@ async function maybeExtractRealWorldKnowledge() {
   }
 }
 
-async function sendInterBotMessage(taskHint) {
+// xAI側の一時障害（503・高負荷・空応答など）でgenerateWithSystemPromptが最終的に失敗した場合、
+// このまま黙って諦めると次の定時（12時/18時）まで一切返信されず「しかと」状態になってしまう。
+// そのため1回だけ、一定時間後に自動リトライする。
+const INTERBOT_RETRY_DELAY_MS = 3 * 60 * 1000; // 3分後
+const INTERBOT_MAX_RETRIES = 1;
+
+async function sendInterBotMessage(taskHint, retryCount = 0) {
   if (!interBotState) return;
   try {
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
@@ -1317,6 +1323,15 @@ async function sendInterBotMessage(taskHint) {
     }
   } catch (err) {
     console.error("[InterBot] 送信エラー:", err.message);
+    if (retryCount < INTERBOT_MAX_RETRIES) {
+      console.warn(`[InterBot] ${INTERBOT_RETRY_DELAY_MS / 1000}秒後に自動リトライします（${retryCount + 1}/${INTERBOT_MAX_RETRIES}）`);
+      setTimeout(() => {
+        sendInterBotMessage(taskHint, retryCount + 1)
+          .catch(e => console.error("[InterBot] リトライ送信エラー:", e.message));
+      }, INTERBOT_RETRY_DELAY_MS);
+    } else {
+      console.error("[InterBot] リトライも失敗。このセッションでの返信を諦めます。");
+    }
   }
 }
 
