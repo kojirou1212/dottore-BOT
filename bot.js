@@ -1294,7 +1294,9 @@ async function sendInterBotMessage(taskHint) {
 
     const text = await aiHandler.generateWithSystemPrompt(systemContent, messages, 250);
     if (!text) return;
-    const ch = await client.channels.fetch(interBotChannelId);
+    // !kaiwaデバッグセッション中は、本番のリビングチャンネルを汚さないようデバッグチャンネル内で完結させる。
+    const destChannelId = interBotState.isDebugMode() ? debugChannelId : interBotChannelId;
+    const ch = await client.channels.fetch(destChannelId);
     if (ch && ch.isTextBased()) {
       await ch.send(text);
       interBotState.recordSent(CHARACTER_NAME, text);
@@ -1800,7 +1802,11 @@ client.on("messageCreate", async (message) => {
   // パンタローネ⇄ドットーレの直接対話チャンネル：相手Botのメッセージにのみ反応する特殊チャンネル
   // （通常はBot自身のメッセージを一律無視するため、この分岐だけ下のbotフィルターより先に処理する。
   // 人間の発言はここでは処理せず、!say-d/!say-p 等の通常経路にそのまま流す）。
-  if (interBotChannelId && message.channelId === interBotChannelId && message.author.bot) {
+  // !kaiwaデバッグセッション中（interBotState.isDebugMode()）は、リビングチャンネルの代わりに
+  // デバッグチャンネル内のBotメッセージをやり取りとして検知する（本番チャンネルを汚さないため）。
+  const isInterBotChannel = interBotChannelId && message.channelId === interBotChannelId;
+  const isDebugInterBotChannel = debugChannelId && message.channelId === debugChannelId && interBotState?.isDebugMode();
+  if ((isInterBotChannel || isDebugInterBotChannel) && message.author.bot) {
     if (message.author.id !== client.user.id) {
       await handleInterBotMessage(message).catch(err => console.error("[InterBot] 処理エラー:", err.message));
     }
@@ -2292,14 +2298,15 @@ client.on("messageCreate", async (message) => {
         return;
       }
       // 出会い直しシナリオ（初回演出）を消費しないよう、everMetは変更せず通常セッションとして強制リセットする。
+      // debugMode=true により、以降のやり取りはリビングチャンネルではなくこのデバッグチャンネル内で完結する。
       interBotState.startDebugSession();
+      // 確認はテキスト返信ではなくリアクションで行う（messageCreateを発火させ、相手Botに対話の
+      // 一言として誤検知されるのを避けるため）。
+      await message.react("💬").catch(() => {});
       if (interBotRole === "initiator") {
-        await message.reply(IS_PANTALONE ? "……承知いたしました。通常セッションとして会話を開始いたします（初回演出は行いません）。" : "……了解した。通常セッションとして会話を開始する（初回演出は行わない）。");
         const hour = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
         sendInterBotMessage(buildInterBotGreetingHint(hour))
           .catch(err => console.error("[InterBot] !kaiwa 送信エラー:", err.message));
-      } else {
-        await message.reply(IS_PANTALONE ? "……承知いたしました。相手からの発言を待ちます。" : "……了解した。相手からの発言を待つ。");
       }
       return;
     }
@@ -2383,7 +2390,7 @@ client.on("messageCreate", async (message) => {
         "!reload                         … messages.json 再読み込み\n" +
         "!sendprofile                    … プロフィールメッセージを今すぐ送信\n" +
         "!scan_profiles                  … プロフィールチャンネルの過去投稿を一括処理\n" +
-        "!kaiwa                          … デバッグ用チャンネルでBot同士の対話を通常セッションとして手動開始（初回演出は消費しない）\n\n" +
+        "!kaiwa                          … このデバッグチャンネル内でBot同士の対話を通常セッションとして手動開始（初回演出は消費せず、リビングチャンネルにも投稿しない）\n\n" +
         `それ以外のメッセージは${CHARACTER_NAME}が回答します。`
       );
       return;

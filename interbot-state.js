@@ -16,7 +16,7 @@ const SESSION_GAP_MS = 60 * 60 * 1000;
 // 両Botとも同じ定数を参照することで、別プロセス・別状態ファイルでも終了タイミングが揃う。
 const MAX_ROUNDS = 6;
 
-const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false });
+const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false, debugMode: false });
 
 class InterBotState {
   constructor() {
@@ -63,11 +63,17 @@ class InterBotState {
 
   // !kaiwaデバッグコマンド用：出会い直しシナリオ（初回演出）を消費せず、常に通常セッションとして
   // 強制リセットする。everMetには触れない（本物の初回演出は、スケジューラ経由の本当に最初の1回の
-  // ためにそのまま温存される）。
+  // ためにそのまま温存される）。debugMode=trueの間、送受信はリビングチャンネルではなくデバッグ
+  // チャンネル内で完結する（sendInterBotMessageの送信先切り替え、messageCreateの検知条件を参照）。
   startDebugSession() {
     this.state = EMPTY_STATE();
+    this.state.debugMode = true;
     this.state.lastActivityAt = Date.now();
     this.save();
+  }
+
+  isDebugMode() {
+    return this.state.debugMode === true;
   }
 
   // 相手からのメッセージ受信時、処理前に呼ぶ。間隔が空きすぎていれば別セッションとみなす。
