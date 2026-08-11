@@ -16,7 +16,7 @@ const SESSION_GAP_MS = 60 * 60 * 1000;
 // 両Botとも同じ定数を参照することで、別プロセス・別状態ファイルでも終了タイミングが揃う。
 const MAX_ROUNDS = 6;
 
-const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false, debugMode: false });
+const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false, debugMode: false, topicSwitched: false });
 
 class InterBotState {
   constructor() {
@@ -74,6 +74,16 @@ class InterBotState {
 
   isDebugMode() {
     return this.state.debugMode === true;
+  }
+
+  // 話題の切り替え（実験の話／直近の相手の話への飛躍）をセッション中1回だけに制限するためのフラグ。
+  hasSwitchedTopic() {
+    return this.state.topicSwitched === true;
+  }
+
+  markTopicSwitched() {
+    this.state.topicSwitched = true;
+    this.save();
   }
 
   // 相手からのメッセージ受信時、処理前に呼ぶ。間隔が空きすぎていれば別セッションとみなす。
