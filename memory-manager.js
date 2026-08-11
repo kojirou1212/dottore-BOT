@@ -113,6 +113,31 @@ class MemoryManager {
     }).join("\n");
   }
 
+  // ─── 自発的な言及の記録（フォローアップ等）─────────────────────────────────
+  // ドットーレ側から能動的に話しかけた内容（!followUp機能など）を記録する。
+  // これを記録しておかないと、内部の記憶データと実際にDiscord上で発した発言が食い違い、
+  // 「言った・言っていない」の食い違いをユーザーとの間で起こしうる（自動抽出entriesとは別枠）。
+  addProactiveStatement(userId, text) {
+    if (!this.data[userId]) this.data[userId] = { entries: [] };
+    if (!this.data[userId].proactive) this.data[userId].proactive = [];
+    this.data[userId].proactive.push({ text: text.trim(), timestamp: Date.now() });
+    if (this.data[userId].proactive.length > 20) {
+      this.data[userId].proactive = this.data[userId].proactive.slice(-20);
+    }
+    this.save();
+  }
+
+  getProactiveStatements(userId) {
+    return (this.data[userId]?.proactive ?? []).slice();
+  }
+
+  formatProactiveForContext(userId) {
+    const items = this.getProactiveStatements(userId);
+    if (items.length === 0) return "";
+    const lines = items.slice(-5).map(e => `・「${e.text}」と自分から話しかけた`).join("\n");
+    return `【自分から直近で話しかけた内容（実際にDiscord上で発言済み。矛盾しないよう一貫性を保つこと）】\n${lines}`;
+  }
+
   // 毎週水曜日に古い記憶を間引く（保持期間は RETENTION_DAYS）
   // 週1回長期記憶を刈り取る一方、1ヶ月分の関係性は失われないようにする
   static RETENTION_DAYS = 30;

@@ -1302,6 +1302,18 @@ const INTERBOT_MAX_RETRIES = 1;
 
 async function sendInterBotMessage(taskHint, retryCount = 0) {
   if (!interBotState) return;
+  // 二重送信防止：自動リトライ（3分後）と手動!tuduketeが競合すると、片方が先に送信済みなのに
+  // もう片方がそれを知らないまま実行され、同じ発言者が連続で喋る／上限超過が起こりうる。
+  // 実行直前に最新の状態を見て、まだ本当に自分の番かを確認する（呼び出し元のチェックはこの間に古くなりうるため）。
+  if (!interBotState.canSend()) {
+    console.warn("[InterBot] 送信上限到達のため中止（二重送信防止・リトライ/手動再開の競合の可能性）");
+    return;
+  }
+  const currentTranscript = interBotState.getTranscript();
+  if (currentTranscript.length > 0 && currentTranscript[currentTranscript.length - 1].speaker === CHARACTER_NAME) {
+    console.warn("[InterBot] 既に自分の発言が記録済みのため中止（二重送信防止・リトライ/手動再開の競合の可能性）");
+    return;
+  }
   try {
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
     const systemContent = `${config.ai.systemPrompt}\n\n現在の日時：${now}\n\n${statusManager.getHint()}\n\n${taskHint}`;
@@ -1603,6 +1615,8 @@ function startFollowUp() {
         await ch.send(`<@${userId}> ${text}`);
         lastFollowUpTime = now;
         followUpCooldowns.set(userId, now);
+        // 実際に発した内容を記録しておく（記憶しておかないと後の会話で内部処理と食い違う）
+        memoryManager.addProactiveStatement(userId, text);
         console.log(`[Bot] フォローアップ発動 [${userId}]: ${text.slice(0, 60)}`);
       }
     } catch (err) {
@@ -2504,6 +2518,7 @@ client.on("messageCreate", async (message) => {
     const userBaseHint = knowledgeBase.getUserBaseHint(userId);
     const memoryHint = memoryManager.formatForContext(userId);
     const savedMemoryHint = memoryManager.formatSavedForContext(userId);
+    const proactiveHint = memoryManager.formatProactiveForContext(userId);
     const topicsHint = getRecentTopicsHint();
     const userSpecificHint = userHints[userId] ?? null;
     const timeHint = getTimeBasedMoodHint();
@@ -2527,7 +2542,7 @@ client.on("messageCreate", async (message) => {
 
     const statusHint = statusManager.getHint();
 
-    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
+    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
