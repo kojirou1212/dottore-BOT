@@ -61,6 +61,15 @@ class InterBotState {
     this._beginSession();
   }
 
+  // !kaiwaデバッグコマンド用：出会い直しシナリオ（初回演出）を消費せず、常に通常セッションとして
+  // 強制リセットする。everMetには触れない（本物の初回演出は、スケジューラ経由の本当に最初の1回の
+  // ためにそのまま温存される）。
+  startDebugSession() {
+    this.state = EMPTY_STATE();
+    this.state.lastActivityAt = Date.now();
+    this.save();
+  }
+
   // 相手からのメッセージ受信時、処理前に呼ぶ。間隔が空きすぎていれば別セッションとみなす。
   ensureFreshSession() {
     if (!this.state.lastActivityAt || Date.now() - this.state.lastActivityAt > SESSION_GAP_MS) {

@@ -2283,6 +2283,27 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    case "!kaiwa": {
+      if (message.channelId !== debugChannelId) return;
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
+      if (!interBotState) {
+        await message.reply(IS_PANTALONE ? "……この機能は設定されていないようですね。" : "……この機能は設定されていない。");
+        return;
+      }
+      // 出会い直しシナリオ（初回演出）を消費しないよう、everMetは変更せず通常セッションとして強制リセットする。
+      interBotState.startDebugSession();
+      if (interBotRole === "initiator") {
+        await message.reply(IS_PANTALONE ? "……承知いたしました。通常セッションとして会話を開始いたします（初回演出は行いません）。" : "……了解した。通常セッションとして会話を開始する（初回演出は行わない）。");
+        const hour = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
+        sendInterBotMessage(buildInterBotGreetingHint(hour))
+          .catch(err => console.error("[InterBot] !kaiwa 送信エラー:", err.message));
+      } else {
+        await message.reply(IS_PANTALONE ? "……承知いたしました。相手からの発言を待ちます。" : "……了解した。相手からの発言を待つ。");
+      }
+      return;
+    }
+
     case "!scan_profiles": {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
       if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
@@ -2361,7 +2382,8 @@ client.on("messageCreate", async (message) => {
         "!say-p [テキスト]               … パンタローネとして任意チャンネルで発言\n" +
         "!reload                         … messages.json 再読み込み\n" +
         "!sendprofile                    … プロフィールメッセージを今すぐ送信\n" +
-        "!scan_profiles                  … プロフィールチャンネルの過去投稿を一括処理\n\n" +
+        "!scan_profiles                  … プロフィールチャンネルの過去投稿を一括処理\n" +
+        "!kaiwa                          … デバッグ用チャンネルでBot同士の対話を通常セッションとして手動開始（初回演出は消費しない）\n\n" +
         `それ以外のメッセージは${CHARACTER_NAME}が回答します。`
       );
       return;
