@@ -1335,6 +1335,29 @@ async function sendInterBotMessage(taskHint, retryCount = 0) {
   }
 }
 
+// 現在のtranscriptの状態に応じて、自分の役割・往復数から次に送るべき発言を判定して送信する。
+// handleInterBotMessage（相手からの受信直後）と!tuduketeデバッグコマンド（手動再開）の両方から使う。
+function continueInterBotSession() {
+  if (!interBotState.canSend()) return Promise.resolve();
+
+  if (interBotRole === "responder") {
+    return sendInterBotMessage(buildInterBotReplyHint());
+  }
+  if (interBotRole === "initiator") {
+    const transcript = interBotState.getTranscript();
+    if (interBotState.isFirstSession()) {
+      // 初回セッションは固定5往復の出会い直しシナリオのみ。それを終えたら続けない。
+      const openIndex = transcript.length / 2 - 1; // 0-based（transcript長 2,4,6,8 に対応）
+      const builder = FIRST_MEETING_PANTALONE_OPEN_HINTS[openIndex];
+      if (!builder) return Promise.resolve();
+      return sendInterBotMessage(builder(interBotSceneHint(), interBotCounterpartName()));
+    }
+    const hint = transcript.length === 2 ? buildInterBotRealWorldReportHint() : buildInterBotFollowUpHint();
+    return sendInterBotMessage(hint);
+  }
+  return Promise.resolve();
+}
+
 async function handleInterBotMessage(message) {
   if (!interBotState) return;
   const content = message.content.trim();
@@ -1344,23 +1367,7 @@ async function handleInterBotMessage(message) {
   interBotState.recordReceived(interBotCounterpartName(), content);
   await maybeExtractRealWorldKnowledge();
 
-  if (!interBotState.canSend()) return;
-
-  if (interBotRole === "responder") {
-    await sendInterBotMessage(buildInterBotReplyHint());
-  } else if (interBotRole === "initiator") {
-    const transcript = interBotState.getTranscript();
-    if (interBotState.isFirstSession()) {
-      // 初回セッションは固定5往復の出会い直しシナリオのみ。それを終えたら続けない。
-      const openIndex = transcript.length / 2 - 1; // 0-based（transcript長 2,4,6,8 に対応）
-      const builder = FIRST_MEETING_PANTALONE_OPEN_HINTS[openIndex];
-      if (!builder) return;
-      await sendInterBotMessage(builder(interBotSceneHint(), interBotCounterpartName()));
-      return;
-    }
-    const hint = transcript.length === 2 ? buildInterBotRealWorldReportHint() : buildInterBotFollowUpHint();
-    await sendInterBotMessage(hint);
-  }
+  await continueInterBotSession();
 }
 
 // ─── 定時スケジューラー ───────────────────────────────────────────────────
@@ -2338,6 +2345,36 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    // !kaiwaとは異なり、進行中の「本物の」セッション（isDebugMode()を書き換えない）をそのまま
+    // 引き継いで、自分の番であればリビングチャンネルへ発言を再送する。APIの一時障害などで
+    // 自動リトライも失敗し、返信が止まってしまった時の手動リカバリー用。
+    case "!tudukete": {
+      if (message.channelId !== debugChannelId) return;
+      const isAdmin = message.member?.permissions.has("Administrator") ?? false;
+      if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
+      if (!interBotState) {
+        await message.reply(IS_PANTALONE ? "……この機能は設定されていないようですね。" : "……この機能は設定されていない。");
+        return;
+      }
+      const transcript = interBotState.getTranscript();
+      if (transcript.length === 0) {
+        await message.reply(IS_PANTALONE ? "……進行中のやり取りが見当たりません。" : "……進行中のやり取りがない。");
+        return;
+      }
+      const lastSpeaker = transcript[transcript.length - 1].speaker;
+      if (lastSpeaker === CHARACTER_NAME) {
+        await message.reply(IS_PANTALONE ? "……こちらはすでに発言済みで、相手の番です。" : "……こちらは発言済みだ。相手の番だ。");
+        return;
+      }
+      if (!interBotState.canSend()) {
+        await message.reply(IS_PANTALONE ? "……このセッションの送信上限に達しています。" : "……このセッションの送信上限に達している。");
+        return;
+      }
+      await message.react("▶️").catch(() => {});
+      continueInterBotSession().catch(err => console.error("[InterBot] !tudukete 送信エラー:", err.message));
+      return;
+    }
+
     case "!scan_profiles": {
       const isAdmin = message.member?.permissions.has("Administrator") ?? false;
       if (!isAdmin) { await message.reply(ADMIN_REQUIRED_REPLY); return; }
@@ -2417,7 +2454,8 @@ client.on("messageCreate", async (message) => {
         "!reload                         … messages.json 再読み込み\n" +
         "!sendprofile                    … プロフィールメッセージを今すぐ送信\n" +
         "!scan_profiles                  … プロフィールチャンネルの過去投稿を一括処理\n" +
-        "!kaiwa                          … このデバッグチャンネル内でBot同士の対話を通常セッションとして手動開始（初回演出は消費せず、リビングチャンネルにも投稿しない）\n\n" +
+        "!kaiwa                          … このデバッグチャンネル内でBot同士の対話を通常セッションとして手動開始（初回演出は消費せず、リビングチャンネルにも投稿しない）\n" +
+        "!tudukete                       … リビングチャンネルで停止中の進行中セッションを、自分の番であれば手動で再開（送信失敗時のリカバリー用）\n\n" +
         `それ以外のメッセージは${CHARACTER_NAME}が回答します。`
       );
       return;
