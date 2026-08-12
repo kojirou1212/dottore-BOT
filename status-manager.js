@@ -103,11 +103,6 @@ const ACTIVITY_POOL = {
   ]),
 };
 
-const EMOTION_POOL = {
-  "ドットーレ": ["無関心", "苛立ち", "興味", "満足", "高揚", "倦怠"],
-  "パンタローネ": ["平静", "上機嫌", "苛立ち", "警戒", "愉悦", "退屈"],
-};
-
 const MOOD_LABELS = ["悪い", "普通", "良い"];
 
 function jstDateStr() {
@@ -144,12 +139,19 @@ const FOCUS_LABELS = [
   { max: 2,  text: "散漫" },         { max: 5,  text: "普通" },
   { max: 7,  text: "集中している" }, { max: 10, text: "極めて集中している" },
 ];
+const CURIOSITY_LABELS = [
+  { max: 2,  text: "無関心" },       { max: 5,  text: "普通" },
+  { max: 7,  text: "興味を示している" }, { max: 10, text: "強い探究心" },
+];
+const VIGILANCE_LABELS = [
+  { max: 2,  text: "無防備" },       { max: 5,  text: "普通" },
+  { max: 7,  text: "用心深い" },     { max: 10, text: "強い警戒心" },
+];
 
 class StatusManager {
   constructor(characterName = "ドットーレ") {
     this.characterName = characterName;
     this.activities = ACTIVITY_POOL[characterName] ?? ACTIVITY_POOL["ドットーレ"];
-    this.emotions = EMOTION_POOL[characterName] ?? EMOTION_POOL["ドットーレ"];
     this.mealHours = MEAL_HOURS[characterName] ?? MEAL_HOURS["ドットーレ"];
     this.bedtimeHour = BEDTIME_HOUR[characterName] ?? BEDTIME_HOUR["ドットーレ"];
     // このキャラが定時チェックの対象になる時刻（やることの抽選 + 食事3回 + 就寝1回、重複除去）
@@ -171,6 +173,10 @@ class StatusManager {
       console.error("[Status] 読み込み失敗:", err.message);
     }
     if (!this.state) this.state = this._initState();
+    // 旧バージョン（感情ステータス）からの移行：新規ゲージが無ければ初期値を補い、廃止した感情は削除する
+    if (this.state.curiosity === undefined) this.state.curiosity = randInt(3, 6);
+    if (this.state.vigilance === undefined) this.state.vigilance = randInt(3, 6);
+    delete this.state.emotion;
   }
 
   save() {
@@ -185,13 +191,14 @@ class StatusManager {
     const laborActivities = this.activities.filter(a => a.type === "labor" && !a.auto);
     return {
       mood: 1,
-      emotion: pick(this.emotions),
       activity: pick(laborActivities).name,
       hunger: randInt(6, 9),
       stamina: randInt(6, 9),
       sleepiness: randInt(0, 2),
       stress: randInt(2, 4),
       focus: randInt(4, 6),
+      curiosity: randInt(3, 6),
+      vigilance: randInt(3, 6),
       lastTickKey: null,
     };
   }
@@ -208,9 +215,10 @@ class StatusManager {
 
     const s = this.state;
 
-    // 機嫌・感情：変化は緩め（毎回ではなく、たまに1段階／1種類だけ動く）
+    // 機嫌・警戒度：変化は緩め（毎回ではなく、たまに1段階だけ動く）。
+    // 警戒度は活動内容に紐付けず独立して揺れさせる（機嫌との相関を避けるため）。
     if (Math.random() < 0.35) s.mood = clamp(s.mood + (Math.random() < 0.5 ? -1 : 1), 0, 2);
-    if (Math.random() < 0.35) s.emotion = pick(this.emotions.filter(e => e !== s.emotion));
+    if (Math.random() < 0.35) s.vigilance = clamp(s.vigilance + (Math.random() < 0.5 ? -1 : 1), 0, 10);
 
     // 就寝：就寝時刻（固定）に達したら体力に関わらず必ず寝る、完全なルーティン。
     // 体力が0になっても就寝時刻でなければ寝ない（ランダム/突発的な就寝はしない）。
@@ -243,11 +251,14 @@ class StatusManager {
       s.sleepiness = clamp(s.sleepiness + drift, 0, 10);
     }
 
-    // ストレス・集中度：選ばれた「やること」が仕事寄りか休息寄りかで増減
+    // ストレス・集中度・好奇心：選ばれた「やること」が仕事寄りか休息寄りかで増減
+    // （好奇心は実験・研究寄りの活動で高まり、休息寄りの活動で落ち着く）
     const activityType = this.activities.find(a => a.name === s.activity)?.type ?? "rest";
     const delta = activityType === "labor" ? randInt(1, 2) : -randInt(1, 2);
     s.stress = clamp(s.stress + delta, 0, 10);
     s.focus = clamp(s.focus + delta, 0, 10);
+    const curiosityDelta = activityType === "labor" ? randInt(1, 2) : -randInt(1, 2);
+    s.curiosity = clamp(s.curiosity + curiosityDelta, 0, 10);
 
     this.save();
   }
@@ -258,12 +269,13 @@ class StatusManager {
     return (
       `【${this.characterName}の現在の状態（会話の背景として自然に滲ませること。数値や「ステータス」という言葉自体を持ち出したり、逐一自己申告したりはしない）】\n` +
       `機嫌：${MOOD_LABELS[s.mood]}\n` +
-      `感情：${s.emotion}\n` +
       `やること：${s.activity}\n` +
       `空腹度：${gaugeLabel(s.hunger, HUNGER_LABELS)}\n` +
       `体力：${gaugeLabel(s.stamina, STAMINA_LABELS)}\n` +
       `眠気：${gaugeLabel(s.sleepiness, SLEEPINESS_LABELS)}\n` +
       `集中度：${gaugeLabel(s.focus, FOCUS_LABELS)}\n` +
+      `好奇心：${gaugeLabel(s.curiosity, CURIOSITY_LABELS)}\n` +
+      `警戒度：${gaugeLabel(s.vigilance, VIGILANCE_LABELS)}\n` +
       `ストレス：${gaugeLabel(s.stress, STRESS_LABELS)}`
     );
   }
@@ -276,12 +288,13 @@ class StatusManager {
       isPantalone ? "……現在の状態を開示いたします。" : "……現在の状態を開示する。",
       "",
       `機嫌：${MOOD_LABELS[s.mood]}`,
-      `感情：${s.emotion}`,
       `やること：${s.activity}`,
       `空腹度：${gaugeLabel(s.hunger, HUNGER_LABELS)}`,
       `体力：${gaugeLabel(s.stamina, STAMINA_LABELS)}`,
       `眠気：${gaugeLabel(s.sleepiness, SLEEPINESS_LABELS)}`,
       `集中度：${gaugeLabel(s.focus, FOCUS_LABELS)}`,
+      `好奇心：${gaugeLabel(s.curiosity, CURIOSITY_LABELS)}`,
+      `警戒度：${gaugeLabel(s.vigilance, VIGILANCE_LABELS)}`,
       `ストレス：${gaugeLabel(s.stress, STRESS_LABELS)}`,
     ].join("\n");
   }
