@@ -172,6 +172,11 @@ const artChannelIds = new Set(
   (config.discord.artChannelId || "")
     .split(",").map(s => s.trim()).filter(Boolean)
 );
+// DMでの会話を許可するユーザーID（DMチャンネルは相手ごとにIDが変わるため、
+// チャンネルIDではなく発言者のユーザーIDで許可判定する）。未設定なら誰にも許可しない。
+const dmAllowedUserIds = new Set(
+  (config.discord.dmAllowedUserIds ?? []).map(String)
+);
 const vcNotifyChannelId = config.discord.vcNotifyChannelId || [...new Set(config.discord.targetChannelIds)][0];
 const zatsuChannelId = config.discord.zatsuChannelId || "";
 const debugChannelId = config.discord.debugChannelId || "";
@@ -1877,7 +1882,8 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  const isTarget = targetChannelIds.has(message.channelId) || commandOnlyChannelIds.has(message.channelId);
+  const isAllowedDM = !message.guild && dmAllowedUserIds.has(message.author.id);
+  const isTarget = isAllowedDM || targetChannelIds.has(message.channelId) || commandOnlyChannelIds.has(message.channelId);
   const isCommandOnly = commandOnlyChannelIds.has(message.channelId);
   const isProfileCh = profileChannelIds.size > 0
     && profileChannelIds.has(message.channelId)
