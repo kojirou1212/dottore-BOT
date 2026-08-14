@@ -103,6 +103,12 @@ class InterBotState {
     return this.state.sentCount < MAX_ROUNDS;
   }
 
+  // 今回送る発言が、このBot自身にとって今セッション最後の送信になるかどうか。
+  // 起承転結の「結」（締めの一言）を組み込むタイミングの判定に使う。
+  willBeFinalSend() {
+    return this.state.sentCount === MAX_ROUNDS - 1;
+  }
+
   getTranscript() {
     return this.state.transcript;
   }
