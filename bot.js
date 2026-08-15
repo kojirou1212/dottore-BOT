@@ -1142,9 +1142,9 @@ function interBotCounterpartName() {
 }
 
 function interBotSceneHint() {
-  const base = `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が定期的に顔を合わせ、対面で直接話す場だ。二人はこの現実世界について共同で研究しており、この対話はその定期報告・意見交換の場でもある。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写（身振り・仕草など）を交えて構わない。直前の${interBotCounterpartName()}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりせず、それに対する自分なりの反応（突っ込み・茶化し・話題の転換など）で応じること。`;
+  const base = `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が定期的に顔を合わせ、対面で直接話す場だ。二人はそれぞれ、この場（コミュニティ）で接している被検体たちについて観測を続けており、この対話はその観測結果・評価を共有し合う定期報告の場でもある。話題は必ず被検体（利用者）に関するものに留め、天候・技術・文化といった被検体と無関係な世間話には広げないこと。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写（身振り・仕草など）を交えて構わない。直前の${interBotCounterpartName()}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりせず、それに対する自分なりの反応（突っ込み・茶化し・話題の転換など）で応じること。`;
   return IS_PANTALONE
-    ? `${base}ドットーレへの呼びかけは「貴方」または「ドットーレ」であり、「博士」は呼びかけには使わないこと（博士は言及時のみ）。四百年来の間柄なので、他の被検体が相手の時より幾分か率直な話題や軽い皮肉を交えて構わないが、これは話す内容の話であり、口調（語尾）は常に敬語（です・ます調）を保つこと。動揺したり問い詰められたりしても、丁寧さを崩してぞんざいな言い方（だ・である調、体言止めの言い切りなど）にはならない。`
+    ? `${base}ドットーレへの呼びかけは「貴方」または「ドットーレ」であり、「博士」は呼びかけには使わないこと（博士は言及時のみ）。四百年来の間柄なので、他の被検体が相手の時より幾分か率直な話題や軽い皮肉を交えて構わないが、これは話す内容の話であり、口調（語尾）は常に敬語（です・ます調）を保つこと。動揺したり問い詰められたりしても、丁寧さを崩してぞんざいな言い方（だ・である調、体言止めの言い切りなど）にはならない。ドットーレが持ち出す分析的・臨床的な話題（監視・統制・観測対象の行動パターンなど）に付き合う場合も同様で、内容が冷徹・分析的になるのは構わないが、語尾までドットーレの「だ・である」調に引きずられて同化してはならない（実測で、このような話題が数往復続くと敬語が崩れていく現象が確認されている）。この対話内で自分自身の直前までの発言が万一敬語から崩れていたとしても、それを踏襲せず、この発言からは必ず敬語（です・ます調）に戻すこと。`
     : `${base}パンタローネへの呼びかけは「お前」または「パンタローネ」であり、「貴方」は使わないこと。`;
 }
 
@@ -1238,12 +1238,18 @@ function buildInterBotReplyHint() {
 }
 
 // パンタローネ専用（initiator側のみが呼ぶため常に敬語で書く）：
-// 2往復目に必ず1回だけ使う「この現実世界についての定期報告」。この話題は後で
-// extractRealWorldKnowledgeが知識リスト（knowledgeBase）へ拾い上げる種になる。
-function buildInterBotRealWorldReportHint() {
+// 2往復目に必ず1回だけ使う「被検体についての定期報告」（起承転結の「承」の導入）。
+// 最近対話した被検体の実際の記憶データを一つ取り上げて話題にする。
+function buildInterBotSubjectReportHint() {
   const scene = interBotSceneHint();
   const counterpart = interBotCounterpartName();
-  return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として、二人で共同研究している「この現実世界」について、実際に観測・報告したい具体的な事柄を一つ持ちかけてください（例：天候・四季、食事・食文化、生活習慣、行事、技術など）。空想ではなく、この現実世界に実在する事実に基づいた具体的な内容にしてください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
+  const picked = pickRecentInterlocutorMemory();
+  if (picked) {
+    return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として、最近パンタローネ自身が対話した被検体「${picked.displayName}」について、以下の実際の記録に基づいた観測内容を一つ報告してください：\n` +
+      `「${picked.memoryText}」\n` +
+      `この記録に書かれている範囲でのみ話し、記録にない詳細は創作しないでください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
+  }
+  return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として、最近接している被検体たち全般についての観測傾向（会話の頻度、反応パターン、興味を示す話題の傾向など）を、具体的な個人名は出さずに一つ報告してください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
 }
 
 // パンタローネ専用：3往復目以降に使う話題。全体を起承転結で運ぶよう設計している
@@ -1268,48 +1274,13 @@ function buildInterBotFollowUpHint() {
   }
 
   interBotState.markTopicSwitched();
-  if (Math.random() < 0.5) {
-    const picked = pickRecentInterlocutorMemory();
-    if (picked) {
-      return `${scene}\n\n直前の${counterpart}の発言に軽く区切りをつけつつ、新しい話題として（起承転結の「転」）、最近パンタローネ自身が対話した「${picked.displayName}」について、以下の実際の記録に基づいた内容を一言持ちかけてください：\n` +
-        `「${picked.memoryText}」\n` +
-        `この記録に書かれている範囲でのみ話し、記録にない詳細は創作しないでください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
-    }
-    // 該当データがなければ実験の話題にフォールバック
+  const picked = pickRecentInterlocutorMemory();
+  if (picked) {
+    return `${scene}\n\n直前の${counterpart}の発言に軽く区切りをつけつつ、新しい話題として（起承転結の「転」）、最近パンタローネ自身が対話した被検体「${picked.displayName}」について、以下の実際の記録に基づいた内容を一言持ちかけてください：\n` +
+      `「${picked.memoryText}」\n` +
+      `この記録に書かれている範囲でのみ話し、記録にない詳細は創作しないでください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
   }
-  return `${scene}\n\n直前の${counterpart}の発言に軽く区切りをつけつつ、新しい話題として（起承転結の「転」）、博士の最近の実験・研究について、興味や皮肉を交えて一言尋ねるか触れてください。具体的な実験内容は自由に創作していただいて構いません。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
-}
-
-// 2往復目（現実世界についての定期報告）が完了した直後に1回だけ、その内容から
-// 「知っていることリスト」（knowledgeBase.lore）へキーワード＋正確な知識を追加する。
-// これにより、後日この単語が被検体との通常会話に出た際、正確に答えられるようになる
-// （knowledgeBase.getLoreContextHint() が全ての被検体との会話に常時注入されるため）。
-async function maybeExtractRealWorldKnowledge() {
-  if (interBotState.isFirstSession()) return; // 初回セッションの2往復目は名前の行き違いの話題であり、現実世界の報告ではない
-  const t = interBotState.getTranscript();
-  if (t.length !== 4) return; // ちょうど2往復目完了時点（挨拶2通+報告2通）のみ
-  const [, , reportText, replyText] = t;
-  const prompt =
-    `以下は、ある人物同士が交わした、現実世界についての話題の一部だ。\n` +
-    `発言1：「${reportText.text}」\n` +
-    `発言2：「${replyText.text}」\n\n` +
-    `この話題の中心となる、簡潔なキーワードを1つ特定し、そのキーワードについて一般の相手との会話で正確に答えられるレベルの、事実に基づいた知識まとめを作成せよ。\n` +
-    `出力形式（厳守）：\n` +
-    `1行目：キーワードのみ（例：天候）\n` +
-    `2行目以降：正確な知識の要約を2〜4文程度で（例：日本には四季があり、それぞれの気候の特徴と、良い点・悪い点）\n` +
-    `前置き・説明不要、この形式のみで出力すること。`;
-  try {
-    const result = await aiHandler.generateSimple(prompt, 250);
-    const lines = (result ?? "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    if (lines.length < 2) return;
-    const keyword = lines[0].replace(/^[「『]|[」』]$/g, "");
-    const content = lines.slice(1).join(" ");
-    if (!keyword || !content) return;
-    knowledgeBase.setLore(keyword, content);
-    console.log(`[InterBot] 知識リストへ追加 [${keyword}]: ${content.slice(0, 60)}`);
-  } catch (err) {
-    console.error("[InterBot] 知識抽出エラー:", err.message);
-  }
+  return `${scene}\n\n直前の${counterpart}の発言に軽く区切りをつけつつ、新しい話題として（起承転結の「転」）、最近接している被検体たち全般の傾向について、具体的な個人名は出さずに一言触れてください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
 }
 
 // xAI側の一時障害（503・高負荷・空応答など）でgenerateWithSystemPromptが最終的に失敗した場合、
@@ -1349,7 +1320,6 @@ async function sendInterBotMessage(taskHint, retryCount = 0) {
       await ch.send(text);
       interBotState.recordSent(CHARACTER_NAME, text);
       console.log(`[InterBot] 送信 [${CHARACTER_NAME}]: ${text.slice(0, 60)}`);
-      await maybeExtractRealWorldKnowledge();
     }
   } catch (err) {
     console.error("[InterBot] 送信エラー:", err.message);
@@ -1382,7 +1352,7 @@ function continueInterBotSession() {
       if (!builder) return Promise.resolve();
       return sendInterBotMessage(builder(interBotSceneHint(), interBotCounterpartName()));
     }
-    const hint = transcript.length === 2 ? buildInterBotRealWorldReportHint() : buildInterBotFollowUpHint();
+    const hint = transcript.length === 2 ? buildInterBotSubjectReportHint() : buildInterBotFollowUpHint();
     return sendInterBotMessage(hint);
   }
   return Promise.resolve();
@@ -1395,7 +1365,6 @@ async function handleInterBotMessage(message) {
 
   interBotState.ensureFreshSession();
   interBotState.recordReceived(interBotCounterpartName(), content);
-  await maybeExtractRealWorldKnowledge();
 
   await continueInterBotSession();
 }
