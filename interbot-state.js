@@ -14,7 +14,12 @@ const SESSION_GAP_MS = 60 * 60 * 1000;
 
 // このBot自身が1セッションで送信してよい上限（＝往復数の上限）。
 // 両Botとも同じ定数を参照することで、別プロセス・別状態ファイルでも終了タイミングが揃う。
-const MAX_ROUNDS = 6;
+const MAX_ROUNDS = 4;
+
+// 初回セッション（出会い直しの固定シナリオ）専用の上限。bot.js側のFIRST_MEETING_ROUNDSと
+// 値を合わせること。MAX_ROUNDSより長い5往復で固定演出が組まれているため、初回セッション中は
+// canSend()の上限をこちらに引き上げる。
+const FIRST_MEETING_MAX_ROUNDS = 5;
 
 const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false, debugMode: false, topicSwitched: false });
 
@@ -100,13 +105,20 @@ class InterBotState {
 
   // このBot自身が、今回のセッションであと送信してよいか
   canSend() {
-    return this.state.sentCount < MAX_ROUNDS;
+    const limit = this.isFirstSession() ? FIRST_MEETING_MAX_ROUNDS : MAX_ROUNDS;
+    return this.state.sentCount < limit;
   }
 
   // 今回送る発言が、このBot自身にとって今セッション最後の送信になるかどうか。
   // 起承転結の「結」（締めの一言）を組み込むタイミングの判定に使う。
   willBeFinalSend() {
     return this.state.sentCount === MAX_ROUNDS - 1;
+  }
+
+  // 今回送る発言が、このBot自身にとって今セッション最後から2番目の送信になるかどうか。
+  // 起承転結の「転」（話題転換）を組み込むタイミングの判定に使う。MAX_ROUNDSの変更に自動追従する。
+  isSecondToLastSend() {
+    return this.state.sentCount === MAX_ROUNDS - 2;
   }
 
   getTranscript() {
