@@ -221,6 +221,16 @@ function trackChannelTopic(message) {
   }
 }
 
+// 話題スニペット中の「博士」「ドットーレ」「Dottore」等の呼称を「私」に変換する。
+// 独り言・応用mutterはドットーレ視点の一人称生成だが、他チャンネルの発言スニペットをそのまま
+// 渡すと「博士を制止するなど」のように三人称の他人事として処理してしまう問題があった（実測で確認）。
+// パンタローネにとっては同じ呼称が「別人＝ドットーレ」を指すため、ドットーレ自身の視点でのみ適用する。
+// トラッキング元データ（channelTopics）自体は変換せず、AIへ渡す直前の文字列にのみ適用する。
+function withDottoreSelfReference(text) {
+  if (IS_PANTALONE) return text;
+  return text.replace(/博士|ドットーレ|[Dd]ottore/g, "私");
+}
+
 function getRecentTopicsHint() {
   const now = Date.now();
   const lines = [];
@@ -229,7 +239,7 @@ function getRecentTopicsHint() {
     if (recent.length === 0) continue;
     const chName = recent[0].channelName;
     const snippet = recent.slice(-3)
-      .map(t => `「${t.content.slice(0, 80)}」(${t.username})`)
+      .map(t => `「${withDottoreSelfReference(t.content.slice(0, 80))}」(${t.username})`)
       .join("、");
     lines.push(`#${chName}: ${snippet}`);
   }
@@ -1140,17 +1150,16 @@ function splitMessage(text, maxLength) {
 
 // ─── Bot同士の直接対話（パンタローネ⇄ドットーレ）────────────────────────────
 // 12時・18時にパンタローネが挨拶を開始し、ドットーレが応答する形で、対面での
-// 会話として交わす（動作描写込み）。パンタローネ→ドットーレの1往復を基本単位とし、
-// 1往復目は挨拶、2往復目は必ず「この現実世界についての定期報告」（後述の知識リスト化
-// のタネになる）、3往復目以降は新しい話題（実験の話50%／直近パンタローネ自身が
-// 話した相手についての話50%）を持ちかける。上限往復数（interbot-state.jsのMAX_ROUNDS）
-// に達するまで続け、必ずしも4往復ちょうどで終わらない。
+// 会話として交わす（動作描写込み）。起承転結（起＝挨拶／承＝世間話の導入／転＝話題転換／
+// 結＝締め）で運び、上限往復数（interbot-state.jsのMAX_ROUNDS）に達するまで続ける。
+// 承・転で話す話題は、被検体についての世間話が基本だが、3割程度の確率で
+// 「今日食べたもの」という二人自身についての話題に振れる（buildFoodTopicHint）。
 function interBotCounterpartName() {
   return IS_PANTALONE ? "ドットーレ" : "パンタローネ";
 }
 
 function interBotSceneHint() {
-  const base = `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が定期的に顔を合わせ、対面で直接話す場だ。二人はそれぞれ、この場（コミュニティ）で接している被検体たちについて観測を続けており、この対話はその観測結果を共有し合う機会でもある。ただし業務報告のような堅苦しい確認作業ではなく、四百年来の気心の知れた間柄同士が、被検体たちの話をネタに世間話・ゴシップ話として盛り上がる、くつろいだ雑談の場として運ぶこと。「〜する必要がある」「確認が必要だ」といった業務報告・タスク管理じみた言い回しを連発しないこと。話題は必ず被検体（利用者）に関するものに留め、天候・技術・文化といった被検体と無関係な世間話には広げないが、被検体の話そのものは分析対象としてではなく、気の置けない相手と面白がって話すような調子で語ること。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写（身振り・仕草など）を交えて構わない。直前の${interBotCounterpartName()}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりせず、それに対する自分なりの反応（突っ込み・茶化し・話題の転換など）で応じること。`;
+  const base = `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が定期的に顔を合わせ、対面で直接話す場だ。二人はそれぞれ、この場（コミュニティ）で接している被検体たちについて観測を続けており、この対話はその観測結果を共有し合う機会でもある。ただし業務報告のような堅苦しい確認作業ではなく、四百年来の気心の知れた間柄同士が、被検体たちの話をネタに世間話・ゴシップ話として盛り上がる、くつろいだ雑談の場として運ぶこと。「〜する必要がある」「確認が必要だ」といった業務報告・タスク管理じみた言い回しを連発しないこと。話題は被検体（利用者）に関するもの、または二人自身の今日の食事の話に留め、天候・技術・文化といった被検体と無関係な世間話には広げないが、被検体の話そのものは分析対象としてではなく、気の置けない相手と面白がって話すような調子で語ること。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写（身振り・仕草など）を交えて構わない。直前の${interBotCounterpartName()}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりせず、それに対する自分なりの反応（突っ込み・茶化し・話題の転換など）で応じること。`;
   return IS_PANTALONE
     ? `${base}ドットーレへの呼びかけは「貴方」または「ドットーレ」であり、「博士」は呼びかけには使わないこと（博士は言及時のみ）。四百年来の間柄なので、他の被検体が相手の時より幾分か率直な話題や軽い皮肉を交えて構わないが、これは話す内容の話であり、口調（語尾）は常に敬語（です・ます調）を保つこと。動揺したり問い詰められたりしても、丁寧さを崩してぞんざいな言い方（だ・である調、体言止めの言い切りなど）にはならない。ドットーレが持ち出す分析的・臨床的な話題（監視・統制・観測対象の行動パターンなど）に付き合う場合も同様で、内容が冷徹・分析的になるのは構わないが、語尾までドットーレの「だ・である」調に引きずられて同化してはならない（実測で、このような話題が数往復続くと敬語が崩れていく現象が確認されている）。この対話内で自分自身の直前までの発言が万一敬語から崩れていたとしても、それを踏襲せず、この発言からは必ず敬語（です・ます調）に戻すこと。`
     : `${base}パンタローネへの呼びかけは「お前」または「パンタローネ」であり、「貴方」は使わないこと。`;
@@ -1245,12 +1254,21 @@ function buildInterBotReplyHint() {
     : `${scene}\n\n直前の${counterpart}の発言に対して自然に応答せよ。素っ気なく皮肉げな態度は保ってよいが、堅苦しい分析用語（「見極める必要がある」「作用しているか」など）を連発する報告口調にはせず、雑談として気の利いた一言・皮肉・軽口で返すこと。ただ拒絶したり話をはぐらかしたりするだけで終わらせず、自分なりの感想を一言添えること。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
 }
 
+// 「今日食べたもの」の世間話。被検体の話と並ぶ、二人自身についての話題として
+// 承（2往復目）・転（話題転換）のどちらからも呼べる共有ヘルパー。
+function buildFoodTopicHint(scene, counterpart, phaseLabel = "") {
+  return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として${phaseLabel}、今日食べたもの（朝食・昼食・夕食など）について世間話として気軽に一言持ちかけてください。自分が今日何を食べたか・まだ食べていないかに軽く触れる、あるいは相手に尋ねる、どちらの形でも構いません。具体的な料理内容は自由に想像して構いません。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文のみ出力してください。`;
+}
+
 // パンタローネ専用（initiator側のみが呼ぶため常に敬語で書く）：
-// 2往復目に必ず1回だけ使う「被検体についての世間話」（起承転結の「承」の導入）。
-// 最近対話した被検体の実際の記憶データを一つ取り上げて話題にする。
+// 2往復目に必ず1回だけ使う話題（起承転結の「承」の導入）。被検体についての世間話が基本だが、
+// 3割程度の確率で「今日食べたもの」の話に振れる。
 function buildInterBotSubjectReportHint() {
   const scene = interBotSceneHint();
   const counterpart = interBotCounterpartName();
+  if (Math.random() < 0.3) {
+    return buildFoodTopicHint(scene, counterpart);
+  }
   const picked = pickRecentInterlocutorMemory();
   if (picked) {
     return `${scene}\n\n直前の${counterpart}の発言を受けつつ、新しい話題として、最近パンタローネ自身が対話した被検体「${picked.displayName}」について、以下の実際の記録に基づいた内容を、堅苦しい報告調ではなく面白がって話すゴシップ話として一つ切り出してください：\n` +
@@ -1281,6 +1299,9 @@ function buildInterBotFollowUpHint() {
   }
 
   interBotState.markTopicSwitched();
+  if (Math.random() < 0.3) {
+    return buildFoodTopicHint(scene, counterpart, "（起承転結の「転」）");
+  }
   const picked = pickRecentInterlocutorMemory();
   if (picked) {
     return `${scene}\n\n直前の${counterpart}の発言に軽く区切りをつけつつ、新しい話題として（起承転結の「転」）、最近パンタローネ自身が対話した被検体「${picked.displayName}」について、以下の実際の記録に基づいた内容を、面白がって話すゴシップ話として一言持ちかけてください：\n` +
@@ -1654,7 +1675,7 @@ async function handleCrossMutter(message) {
 
   const topics = (channelTopics.get(message.channelId) ?? []).slice(-3);
   if (topics.length === 0) return;
-  const snippet = topics.map(t => `「${t.content}」(${t.username})`).join("、");
+  const snippet = topics.map(t => `「${withDottoreSelfReference(t.content)}」(${t.username})`).join("、");
 
   const prompt =
     `以下は、パンタローネが被検体と交わしている会話の断片だ。\n${snippet}\n\n` +
