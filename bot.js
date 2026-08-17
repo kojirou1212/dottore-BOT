@@ -190,6 +190,14 @@ const interBotChannelId = config.discord.interBotChannelId || "";
 const interBotRole = config.discord.interBotRole || "";
 const interBotState = interBotChannelId ? new InterBotState() : null;
 
+// ─── 応用mutter：もう一方のBotの担当チャンネルに割り込み、割り込まれた側がツッコミを返す ──
+// （試験的機能・config.discord.crossMutterChannelIdが設定された時のみ。両Botの設定ファイルに
+// 同じチャンネルIDを設定しておくこと。またDiscord側でそのチャンネルを両方のBotアカウントが
+// 閲覧できる状態にしておく必要がある）。
+const crossMutterChannelId = config.discord.crossMutterChannelId || "";
+let lastCrossMutterAt = 0; // 連鎖・頻発防止用のクールダウン起点
+const CROSS_MUTTER_COOLDOWN_MS = 30 * 60 * 1000; // 30分
+
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
 const TOPIC_MAX_PER_CH = 15;
@@ -1611,6 +1619,61 @@ function startFollowUp() {
   }, 60 * 60 * 1000);
 }
 
+// ─── 応用mutter：もう一方のBotの担当チャンネルへの割り込み＋ツッコミ返し（試験的機能）────
+// textMutterと同じ「自発的な一言コメント」の仕組みを、特定チャンネルの直近のやり取りに
+// 絞って流用している。ドットーレ側：パンタローネが被検体に返信した直後（＝そのbotメッセージを
+// 検知した時）に低確率・クールダウン付きで発火し、会話に割り込む一言を発する。
+// パンタローネ側：ドットーレの割り込みを検知したら、確率判定なしで必ずツッコミを一言返す
+// （割り込み自体が低確率のクールダウン付きなので、ツッコミ側まで確率で絞る必要はない）。
+async function handleCrossMutter(message) {
+  if (!crossMutterChannelId) return;
+
+  if (IS_PANTALONE) {
+    const dottoreLine = message.content.trim();
+    if (!dottoreLine) return;
+    const prompt =
+      `直前にドットーレが、被検体との会話に不意に割り込んでこう言った：「${dottoreLine}」\n\n` +
+      `パンタローネ（穏やかで丁寧、皮肉屋）として、この割り込みに軽くツッコミを入れてください。` +
+      `ドットーレへ呼びかけつつ、今は被検体と話している最中だとやんわり窘め、会話を被検体へ戻す形で。` +
+      `1〜2文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文のみ出力してください。`;
+    try {
+      const text = await aiHandler.generateSimple(prompt, 150);
+      if (text) {
+        await message.channel.send(text);
+        console.log(`[Bot] 応用mutterツッコミ発動: ${text.slice(0, 60)}`);
+      }
+    } catch (err) {
+      console.error("[Bot] 応用mutterツッコミエラー:", err.message);
+    }
+    return;
+  }
+
+  // ドットーレ側：パンタローネの返信を検知。低確率・クールダウン付きで割り込む。
+  if (Date.now() - lastCrossMutterAt < CROSS_MUTTER_COOLDOWN_MS) return;
+  if (Math.random() > 0.10) return;
+
+  const topics = (channelTopics.get(message.channelId) ?? []).slice(-3);
+  if (topics.length === 0) return;
+  const snippet = topics.map(t => `「${t.content}」(${t.username})`).join("、");
+
+  const prompt =
+    `以下は、パンタローネが被検体と交わしている会話の断片だ。\n${snippet}\n\n` +
+    `ドットーレ（冷静・傲慢・知的な研究者）として、この会話に割り込むように自発的に一言コメントせよ。` +
+    `誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構わない。1〜2文、80文字程度。` +
+    `行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力。`;
+
+  try {
+    const text = await aiHandler.generateSimple(prompt, 120);
+    if (text) {
+      lastCrossMutterAt = Date.now();
+      await message.channel.send(text);
+      console.log(`[Bot] 応用mutter発動: ${text.slice(0, 60)}`);
+    }
+  } catch (err) {
+    console.error("[Bot] 応用mutterエラー:", err.message);
+  }
+}
+
 // ─── 起動バナー ───────────────────────────────────────────────────────────
 function printStartupBanner(tag, mood) {
   const R = "\x1b[0m";
@@ -1843,6 +1906,15 @@ client.on("messageCreate", async (message) => {
   if ((isInterBotChannel || isDebugInterBotChannel) && message.author.bot) {
     if (message.author.id !== client.user.id) {
       await handleInterBotMessage(message).catch(err => console.error("[InterBot] 処理エラー:", err.message));
+    }
+    return;
+  }
+
+  // 応用mutter専用チャンネル：もう一方のBotのメッセージにのみ反応する（人間の発言は通常経路へ）。
+  const isCrossMutterChannel = crossMutterChannelId && message.channelId === crossMutterChannelId;
+  if (isCrossMutterChannel && message.author.bot) {
+    if (message.author.id !== client.user.id) {
+      await handleCrossMutter(message).catch(err => console.error("[Bot] 応用mutter処理エラー:", err.message));
     }
     return;
   }
