@@ -1671,7 +1671,7 @@ async function handleCrossMutter(message) {
 
   // ドットーレ側：パンタローネの返信を検知。低確率・クールダウン付きで割り込む。
   if (Date.now() - lastCrossMutterAt < CROSS_MUTTER_COOLDOWN_MS) return;
-  if (Math.random() > 0.10) return;
+  if (Math.random() > 0.30) return;
 
   const topics = (channelTopics.get(message.channelId) ?? []).slice(-3);
   if (topics.length === 0) return;
