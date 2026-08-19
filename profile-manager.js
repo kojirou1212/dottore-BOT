@@ -6,6 +6,13 @@ const PROFILES_PATH = process.env.PROFILES_FILE
   ? path.resolve(__dirname, process.env.PROFILES_FILE)
   : path.join(__dirname, "user-profiles.json");
 
+// firstSeen/lastSeenと同じロケール表記（例：「2026/8/19」）で日付文字列を返す。
+// 連続対話日数の判定に、他のbotRecord日付フィールドと同一の表記で比較するため使う。
+function jstDateStr(offsetDays = 0) {
+  const t = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  return t.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
+}
+
 // 日本語フィールド名 → 内部キー
 const FIELD_MAP = {
   "呼び名": "name",
@@ -77,6 +84,9 @@ class ProfileManager {
             const count = p.botRecord?.messageCount ?? 0;
             p.botRecord.milestonesReached = MILESTONES.filter(m => count >= m);
           }
+          if (typeof p.botRecord?.streakDays !== "number") {
+            p.botRecord.streakDays = 0;
+          }
         }
         console.log(`[Profiles] ${Object.keys(this.profiles).length}件読み込み完了`);
       }
@@ -107,17 +117,27 @@ class ProfileManager {
           survivalCount: 0,
           observation: null,
           milestonesReached: [],
+          streakDays: 0,
         },
       };
     }
     return this.profiles[userId];
   }
 
-  // メッセージ受信時に呼ぶ（カウント・最終観測更新）
+  // メッセージ受信時に呼ぶ（カウント・最終観測更新・連続対話日数の更新）。
+  // 日付が変わって最初のメッセージの時だけ連続日数を判定する：前回の最終観測が
+  // 「昨日」なら連続とみなし+1、そうでなければ（間が空いた・初回）1にリセットする。
   onMessage(userId, displayName) {
     const p = this._getOrCreate(userId, displayName);
     p.displayName = displayName;
-    p.botRecord.lastSeen = new Date().toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
+    const today = jstDateStr();
+    if (p.botRecord.lastSeen !== today) {
+      const yesterday = jstDateStr(-1);
+      p.botRecord.streakDays = p.botRecord.lastSeen === yesterday ? (p.botRecord.streakDays || 0) + 1 : 1;
+    } else if (!p.botRecord.streakDays) {
+      p.botRecord.streakDays = 1;
+    }
+    p.botRecord.lastSeen = today;
     p.botRecord.messageCount++;
     this.save();
   }
@@ -288,10 +308,17 @@ class ProfileManager {
       ? `【関係進展段階】${intimacyStage}（会話${count}回）`
       : "";
 
-    if (parts.length === 0 && !ageNote && !weaknessHint && !observationHint && !familiarityHint && !intimacyStageHint) return "";
+    // 連続対話日数に応じて、ドットーレが少しずつ素直になっていくヒント（ドットーレ限定）。
+    // 強がり・皮肉・警戒といった人格の根幹は保ったまま、素直さが「わずかに滲む」程度に留める。
+    const streakDays = p.botRecord.streakDays || 0;
+    const streakHint = (this.characterName === "ドットーレ" && streakDays >= 2)
+      ? `【連続対話日数】${streakDays}日連続でこの被検体と会話している。連続日数が長いほど、強がり・はぐらかし・皮肉の割合を少しずつ減らし、本音や率直な反応をわずかに多く見せること（例：素直に礼を言う、素直に興味を認める、はぐらかさず直接答える）。ただし人格の根幹（傲慢・冷静・警戒心）までは崩さず、あくまで素直さが滲む程度に留めること。日数が浅いうちはほとんど変化を見せず、積み重なるほど徐々に、が基本。`
+      : "";
+
+    if (parts.length === 0 && !ageNote && !weaknessHint && !observationHint && !familiarityHint && !intimacyStageHint && !streakHint) return "";
 
     const baseHint = parts.length > 0 ? `【この被検体の記録】${parts.join("、")}。` : "";
-    return [baseHint, observationHint, ageNote, weaknessHint, familiarityHint, intimacyStageHint].filter(Boolean).join("\n");
+    return [baseHint, observationHint, ageNote, weaknessHint, familiarityHint, intimacyStageHint, streakHint].filter(Boolean).join("\n");
   }
 }
 
