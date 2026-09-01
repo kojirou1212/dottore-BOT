@@ -361,16 +361,21 @@ ${soundList}
     };
 
     try {
-      const primaryModel = this.config.grok.model;
+      // 効果音の選択は「インデックス＋短い一言」を返すだけの軽量な分類タスクなので、
+      // フラッグシップ（config.grok.model）ではなく安価なモデルを既定で使う。
+      // VC滞在中は発話ごとに毎回発火するため、ここのモデル選択がAPIコストに直結する。
+      const primaryModel = this.config.grok.soundSelectModel
+        || this.config.grok.fallbackModel
+        || this.config.grok.model;
+      const backupModel = primaryModel === this.config.grok.model ? null : this.config.grok.model;
       let data = null;
 
       try {
         data = await callGrok(primaryModel);
       } catch (primaryErr) {
-        const fallbackModel = this.config.grok.fallbackModel;
-        if (fallbackModel) {
-          console.warn(`[VCHandler] プライマリモデル失敗。フォールバック: ${fallbackModel}`);
-          data = await callGrok(fallbackModel);
+        if (backupModel) {
+          console.warn(`[VCHandler] 音声選択モデル失敗。フォールバック: ${backupModel}`);
+          data = await callGrok(backupModel);
         }
       }
 
