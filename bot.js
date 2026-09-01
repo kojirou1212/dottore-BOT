@@ -198,6 +198,13 @@ const crossMutterChannelId = config.discord.crossMutterChannelId || "";
 let lastCrossMutterAt = 0; // 連鎖・頻発防止用のクールダウン起点
 const CROSS_MUTTER_COOLDOWN_MS = 30 * 60 * 1000; // 30分
 
+// 直近の割り込みイベント（ドットーレの割り込み＋パンタローネのツッコミ）を保持する。
+// このチャンネルで人間が発言した際、systemHintとして渡し、Botが「割り込みが起きたこと」を
+// 認識した上で応答できるようにする（被検体が「はかせうるさい」等と割り込みに言及しても、
+// 知らないふりをして「博士が何か？」と返してしまう不整合を防ぐ）。
+let lastCrossMutterEvent = null; // { dottoreLine, retort, at }
+const CROSS_MUTTER_EVENT_TTL_MS = 20 * 60 * 1000; // 20分は「直前の出来事」として扱う
+
 // ─── 全チャンネル監視（話題トラッキング）────────────────────────────────────
 const channelTopics = new Map(); // channelId → [{username, content, channelName, timestamp}]
 const TOPIC_MAX_PER_CH = 15;
@@ -245,6 +252,29 @@ function getRecentTopicsHint() {
   }
   if (lines.length === 0) return "";
   return `【他チャンネルの最近の動向（参考情報）】\n${lines.join("\n")}`;
+}
+
+// 直近の割り込みイベントを systemHint 文字列に変換する。
+// crossMutterChannel で人間が発言したときのみ、かつイベントがまだ新しいときのみ返す。
+function getCrossMutterEventHint(channelId) {
+  if (!crossMutterChannelId || channelId !== crossMutterChannelId) return "";
+  if (!lastCrossMutterEvent) return "";
+  const elapsed = Date.now() - lastCrossMutterEvent.at;
+  if (elapsed > CROSS_MUTTER_EVENT_TTL_MS) return "";
+
+  const min = Math.max(1, Math.round(elapsed / 60000));
+  const { dottoreLine, retort } = lastCrossMutterEvent;
+
+  if (IS_PANTALONE) {
+    return `【直前の出来事（あなたも被検体も見ている）】\n` +
+      `約${min}分前、ドットーレが被検体との会話に不意に割り込み、「${dottoreLine}」と発言した。` +
+      (retort ? `あなた（パンタローネ）はそれに「${retort}」と返し、話を被検体に戻した。` : ``) +
+      `被検体が博士（ドットーレ）や「割り込み」「うるさい」等に言及した場合、知らないふりをせず、` +
+      `この割り込みが実際に起きたことを踏まえて自然に応答すること。「博士が何か？」のように出来事自体を認識していない返答はしないこと。`;
+  }
+  return `【直前の出来事（あなたも被検体も見ている）】\n` +
+    `約${min}分前、あなた（ドットーレ）はパンタローネと被検体の会話に割り込み、「${dottoreLine}」と発言した。` +
+    `被検体がその割り込みに言及した場合、知らないふりをせず、割り込んだ事実を踏まえて応答すること。`;
 }
 
 // ─── 観察メモ更新（5会話ごと or 重要イベント時、クールダウン付き）────────────
@@ -1661,6 +1691,7 @@ async function handleCrossMutter(message) {
       const text = await aiHandler.generateSimple(prompt, 150);
       if (text) {
         await message.channel.send(text);
+        lastCrossMutterEvent = { dottoreLine, retort: text, at: Date.now() };
         console.log(`[Bot] 応用mutterツッコミ発動: ${text.slice(0, 60)}`);
       }
     } catch (err) {
@@ -1688,6 +1719,7 @@ async function handleCrossMutter(message) {
     if (text) {
       lastCrossMutterAt = Date.now();
       await message.channel.send(text);
+      lastCrossMutterEvent = { dottoreLine: text, retort: null, at: Date.now() };
       console.log(`[Bot] 応用mutter発動: ${text.slice(0, 60)}`);
     }
   } catch (err) {
@@ -2600,6 +2632,7 @@ client.on("messageCreate", async (message) => {
     const savedMemoryHint = memoryManager.formatSavedForContext(userId);
     const proactiveHint = memoryManager.formatProactiveForContext(userId);
     const topicsHint = getRecentTopicsHint();
+    const crossMutterEventHint = getCrossMutterEventHint(message.channelId);
     const userSpecificHint = userHints[userId] ?? null;
     const timeHint = getTimeBasedMoodHint();
 
@@ -2622,7 +2655,7 @@ client.on("messageCreate", async (message) => {
 
     const statusHint = statusManager.getHint();
 
-    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
+    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
