@@ -2652,6 +2652,16 @@ client.on("messageCreate", async (message) => {
     const userSpecificHint = userHints[userId] ?? null;
     const timeHint = getTimeBasedMoodHint();
 
+    // 会話が進むにつれて返答が肥大化する（括弧書きの動作描写を何段も積み重ねる、
+    // 軽い発言にも長文で返す）傾向への抑制。履歴に長い自分の返答が並ぶと、
+    // それを真似てさらに長くなる正のフィードバックが起きるため、毎回明示する。
+    const lengthDisciplineHint =
+      `【返答の分量】括弧書きの動作描写は1返答につき1つを基本とし、多くても2つまで。` +
+      `「（動作）→短いセリフ→（動作）→短いセリフ」と何度も交互に積み重ねないこと。` +
+      `挨拶・軽口・とりとめのない発言・中身の薄い発言には短く返す（セリフ1〜2文、動作描写は0〜1つ）。` +
+      `返答を長くしてよいのは、${CHARACTER_NAME}が本当に知的な興味を引かれた時だけ。` +
+      `直前までの自分の返答が長くても、それに引きずられて長くしないこと。会話が進んでも1返答あたりの分量は増やさない。`;
+
     let returningUserHint = null;
     if (config.features?.returningUser !== false && prevLastSeen && !returningUserGreeted.has(userId)) {
       const daysDiff = Math.floor((Date.now() - new Date(prevLastSeen).getTime()) / (1000 * 60 * 60 * 24));
@@ -2671,7 +2681,7 @@ client.on("messageCreate", async (message) => {
 
     const statusHint = statusManager.getHint();
 
-    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint].filter(Boolean).join("\n\n") || undefined;
+    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
