@@ -252,6 +252,14 @@ function stripPantaloneEpithet(text) {
   return text.replace(/富者(?:様|殿|さん|君)?/g, "あいつ");
 }
 
+// ドットーレの名前を必ずカタカナ「ドットーレ」に均す（"Dottore" / "ドクター" / "ドットーレ博士" 等の
+// 表記ゆれを防ぐ）。system-prompt無しの generateSimple 経路（応用mutter等）ではモデルがラテン表記を
+// そのまま出すことがあるため、送信直前にかける。
+function normalizeDottoreName(text) {
+  if (!text) return text;
+  return text.replace(/[Dd]ottore/g, "ドットーレ").replace(/ドクター/g, "ドットーレ");
+}
+
 function getRecentTopicsHint() {
   const now = Date.now();
   const lines = [];
@@ -1503,8 +1511,10 @@ async function sendInterBotMessage(taskHint, retryCount = 0) {
       ? transcript.map(t => ({ role: t.speaker === CHARACTER_NAME ? "assistant" : "user", content: t.text }))
       : [{ role: "user", content: "（このセッションを開始せよ）" }];
 
-    const text = await aiHandler.generateWithSystemPrompt(systemContent, messages, 250);
-    if (!text) return;
+    const rawText = await aiHandler.generateWithSystemPrompt(systemContent, messages, 250);
+    if (!rawText) return;
+    // パンタローネがドットーレを "Dottore" / "ドクター" と表記することがあるため均す。
+    const text = IS_PANTALONE ? normalizeDottoreName(rawText) : rawText;
     // !kaiwaデバッグセッション中は、本番のリビングチャンネルを汚さないようデバッグチャンネル内で完結させる。
     const destChannelId = interBotState.isDebugMode() ? debugChannelId : interBotChannelId;
     const ch = await client.channels.fetch(destChannelId);
@@ -1824,9 +1834,10 @@ async function handleCrossMutter(message) {
       `直前にドットーレが、被検体との会話に不意に割り込んでこう言った：${dottoreLine}\n\n` +
       `パンタローネ（穏やかで丁寧、皮肉屋）として、この割り込みに軽くツッコミを入れてください。` +
       `ドットーレへ呼びかけつつ、今は被検体と話している最中だとやんわり窘め、会話を被検体へ戻す形で。` +
+      `相手の呼び名は必ずカタカナで「ドットーレ」と書くこと（「Dottore」「ドクター」等の表記は使わない）。` +
       `1〜2文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文のみ出力してください。セリフ全体を「」で囲まないこと（括弧書きの動作描写以外は、地の文のまま出力すること）。`;
     try {
-      const text = await aiHandler.generateSimple(prompt, 150);
+      const text = normalizeDottoreName(await aiHandler.generateSimple(prompt, 150));
       if (text) {
         await message.channel.send(text);
         lastCrossMutterEvent = { dottoreLine, retort: text, at: Date.now() };
