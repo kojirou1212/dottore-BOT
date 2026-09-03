@@ -291,6 +291,45 @@ function getCrossMutterEventHint(channelId) {
     `被検体がその割り込みに言及した場合、知らないふりをせず、割り込んだ事実を踏まえて応答すること。`;
 }
 
+// ─── 反復回避ヒント ───────────────────────────────────────────────────────
+// grok-4-fast 系（非推論）は自分の直前の出力を追跡できず、同じ仕草・同じ枕詞
+// （「そうか」「なるほど」「随分と」、相手の言葉のオウム返し）に固着しやすい。
+// 静的プロンプトに禁止フレーズを逐語で並べると、その文字列自体が再利用を誘発するため、
+// 「直近で実際に何を使ったか」だけを毎ターン差し戻す動的ヒントで抑える。
+const CRUTCH_OPENER_RE = /^(?:…+)?\s*(そうか|そうですか|そうですね|なるほど|ふむ|ふん|随分と|ずいぶんと)/;
+const ECHO_OPENER_RE = /^[^（）()\n。！？]{1,12}(?:か。|か、|、と。|、だと[。？]|だと[。？]|というわけか|ということか|ですか。)/;
+
+function getAntiRepetitionHint(userId) {
+  const history = aiHandler.getHistory(userId);
+  const recent = history.filter(h => h.role === "assistant").slice(-4).map(h => h.content || "");
+  if (recent.length === 0) return "";
+
+  const gestureCount = recent.reduce(
+    (n, m) => n + (m.match(/[（(][^（）()]{1,40}[）)]/g)?.length ?? 0), 0);
+  const deskish = (recent.join("").match(/机|ペン|カップ|コーヒー|眼鏡|記録用紙|ページ|息を[吐つ]/g) ?? []).length;
+
+  const lastBody = recent[recent.length - 1]
+    .replace(/[（(][^（）()]*[）)]/g, "")
+    .replace(/\s+/g, "");
+  const openedBad = CRUTCH_OPENER_RE.test(lastBody) || ECHO_OPENER_RE.test(lastBody);
+
+  const parts = ["【今回の返答で厳守（反復回避）】"];
+  parts.push(
+    `一文目から${CHARACTER_NAME}自身の反応・評価・観察に入ること。` +
+    `相手の発言の語をそのまま返す書き出し（「〜か。」「〜、と。」「〜だと。」「〜ですか。」等）や、` +
+    `「そうか」「なるほど」「ふむ」「随分と」で始める書き出しをしないこと。`);
+  if (openedBad) {
+    parts.push("※直前の返答はまさにその禁じ手で書き出している。今回は必ず別の入り方にすること。");
+  }
+  if (gestureCount >= 3 || deskish >= 3) {
+    parts.push(
+      "直近の返答で括弧書きの仕草が続き、机・ペン・カップ・呼吸系の描写に偏っている。" +
+      "今回は仕草を入れないか、入れるなら机まわり・呼吸・視線以外の身体的要素にすること。");
+  }
+  parts.push("直近の返答と同じ文型・同じ締めの定型文を繰り返さないこと。");
+  return parts.join("\n");
+}
+
 // ─── 観察メモ更新（5会話ごと or 重要イベント時、クールダウン付き）────────────
 const observationCooldowns = new Map(); // userId → lastUpdateTimestamp
 
@@ -2649,6 +2688,7 @@ client.on("messageCreate", async (message) => {
     const proactiveHint = memoryManager.formatProactiveForContext(userId);
     const topicsHint = getRecentTopicsHint();
     const crossMutterEventHint = getCrossMutterEventHint(message.channelId);
+    const antiRepetitionHint = getAntiRepetitionHint(userId);
     const userSpecificHint = userHints[userId] ?? null;
     const timeHint = getTimeBasedMoodHint();
 
@@ -2681,7 +2721,7 @@ client.on("messageCreate", async (message) => {
 
     const statusHint = statusManager.getHint();
 
-    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint].filter(Boolean).join("\n\n") || undefined;
+    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint, antiRepetitionHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
