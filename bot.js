@@ -296,35 +296,44 @@ function getCrossMutterEventHint(channelId) {
 // （「そうか」「なるほど」「随分と」、相手の言葉のオウム返し）に固着しやすい。
 // 静的プロンプトに禁止フレーズを逐語で並べると、その文字列自体が再利用を誘発するため、
 // 「直近で実際に何を使ったか」だけを毎ターン差し戻す動的ヒントで抑える。
-const CRUTCH_OPENER_RE = /^(?:…+)?\s*(そうか|そうですか|そうですね|なるほど|ふむ|ふん|随分と|ずいぶんと)/;
+const CRUTCH_OPENER_RE = /^(?:…+)?\s*(そうか|そうだな|そうですか|そうですね|なるほど|ふむ|ふん|随分と|ずいぶんと)/;
 const ECHO_OPENER_RE = /^[^（）()\n。！？]{1,12}(?:か。|か、|、と。|、だと[。？]|だと[。？]|というわけか|ということか|ですか。)/;
+const QUESTION_END_RE = /(？|\?|か。|かな。|かね。|のか。|のでしょう。|でしょうか。|いかがですか。|いただけますか。|ますか。)\s*$/;
+const PROP_RE = /机|ペン|カップ|コーヒー|眼鏡|記録用紙|ページ|グラス|ワイン|杯|葉巻|煙草|たばこ|袖口|カフス|懐中時計|契約書|ナプキン|息を[吐つ]/g;
+const stripTrailingGesture = (s) => s.replace(/(?:[（(][^（）()]*[）)]\s*)+$/, "").trim();
 
 function getAntiRepetitionHint(userId) {
   const history = aiHandler.getHistory(userId);
-  const recent = history.filter(h => h.role === "assistant").slice(-4).map(h => h.content || "");
+  const recent = history.filter(h => h.role === "assistant").slice(-4).map(h => (h.content || "").trim());
   if (recent.length === 0) return "";
 
   const gestureCount = recent.reduce(
     (n, m) => n + (m.match(/[（(][^（）()]{1,40}[）)]/g)?.length ?? 0), 0);
-  const deskish = (recent.join("").match(/机|ペン|カップ|コーヒー|眼鏡|記録用紙|ページ|息を[吐つ]/g) ?? []).length;
+  const propHits = (recent.join("").match(PROP_RE) ?? []).length;
 
   const lastBody = recent[recent.length - 1]
     .replace(/[（(][^（）()]*[）)]/g, "")
     .replace(/\s+/g, "");
   const openedBad = CRUTCH_OPENER_RE.test(lastBody) || ECHO_OPENER_RE.test(lastBody);
+  const questionEndings = recent.slice(-3).filter(m => QUESTION_END_RE.test(stripTrailingGesture(m))).length;
 
   const parts = ["【今回の返答で厳守（反復回避）】"];
   parts.push(
     `一文目から${CHARACTER_NAME}自身の反応・評価・観察に入ること。` +
-    `相手の発言の語をそのまま返す書き出し（「〜か。」「〜、と。」「〜だと。」「〜ですか。」等）や、` +
-    `「そうか」「なるほど」「ふむ」「随分と」で始める書き出しをしないこと。`);
+    `相手の発言の語をそのまま返す書き出し（「〜か。」「〜、と。」「〜ですか。」等）や、` +
+    `「そうか」「そうですか」「なるほど」「ふむ」「随分と」で始める書き出しをしないこと。`);
   if (openedBad) {
     parts.push("※直前の返答はまさにその禁じ手で書き出している。今回は必ず別の入り方にすること。");
   }
-  if (gestureCount >= 3 || deskish >= 3) {
+  if (questionEndings >= 2) {
     parts.push(
-      "直近の返答で括弧書きの仕草が続き、机・ペン・カップ・呼吸系の描写に偏っている。" +
-      "今回は仕草を入れないか、入れるなら机まわり・呼吸・視線以外の身体的要素にすること。");
+      "※直近の返答が続けて疑問・問い返しで終わっており、取り調べのようになっている。" +
+      "今回は質問で終えず、言い切り・所感・値踏み・軽い一言で締めること。相手に次の情報を要求しないこと。");
+  }
+  if (gestureCount >= 3 || propHits >= 3) {
+    parts.push(
+      "直近の返答で括弧書きの仕草が続き、同じ小道具（机・ペン・カップ／グラス・葉巻など）や呼吸描写に偏っている。" +
+      "今回は仕草を入れないか、入れるなら手・姿勢・視線・間・声の調子など別の要素にすること。");
   }
   parts.push("直近の返答と同じ文型・同じ締めの定型文を繰り返さないこと。");
   return parts.join("\n");
