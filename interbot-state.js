@@ -14,11 +14,12 @@ const SESSION_GAP_MS = 60 * 60 * 1000;
 
 // このBot自身が1セッションで送信してよい上限（＝往復数の上限）。
 // 両Botとも同じ定数を参照することで、別プロセス・別状態ファイルでも終了タイミングが揃う。
-const MAX_ROUNDS = 4;
+// 起承転結の「承（掘り下げ）」の往復数がここに比例して増減する（転・結は末尾固定）。
+const MAX_ROUNDS = 8;
 
 // 初回セッション（出会い直しの固定シナリオ）専用の上限。bot.js側のFIRST_MEETING_ROUNDSと
-// 値を合わせること。MAX_ROUNDSより長い5往復で固定演出が組まれているため、初回セッション中は
-// canSend()の上限をこちらに引き上げる。
+// 値を合わせること。固定演出が5往復で組まれているため、初回セッション中はcanSend()の上限を
+// こちらに固定する（everMet=true以降は未使用の経路）。
 const FIRST_MEETING_MAX_ROUNDS = 5;
 
 const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false, debugMode: false, topicSwitched: false });
