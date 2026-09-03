@@ -22,7 +22,8 @@ const MAX_ROUNDS = 8;
 // こちらに固定する（everMet=true以降は未使用の経路）。
 const FIRST_MEETING_MAX_ROUNDS = 5;
 
-const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false, debugMode: false, topicSwitched: false });
+// sessionMode: "report"（通常＝12時/18時の観測共有）/ "relax"（23時＝薄暗い部屋でくつろぐ夜の時間）
+const EMPTY_STATE = () => ({ sentCount: 0, lastActivityAt: 0, transcript: [], mentionedUserIds: [], isFirstSession: false, debugMode: false, topicSwitched: false, sessionMode: "report" });
 
 class InterBotState {
   constructor() {
@@ -53,18 +54,23 @@ class InterBotState {
     }
   }
 
-  _beginSession() {
+  _beginSession(mode = "report") {
     const isFirstSession = !this.everMet;
     this.state = EMPTY_STATE();
     this.state.isFirstSession = isFirstSession;
+    this.state.sessionMode = mode;
     this.state.lastActivityAt = Date.now();
     this.everMet = true;
     this.save();
   }
 
   // 定時トリガーによる新規セッション開始時に呼ぶ（強制リセット）
-  startSession() {
-    this._beginSession();
+  startSession(mode = "report") {
+    this._beginSession(mode);
+  }
+
+  getSessionMode() {
+    return this.state.sessionMode ?? "report";
   }
 
   // !kaiwaデバッグコマンド用：出会い直しシナリオ（初回演出）を消費せず、常に通常セッションとして
@@ -93,9 +99,11 @@ class InterBotState {
   }
 
   // 相手からのメッセージ受信時、処理前に呼ぶ。間隔が空きすぎていれば別セッションとみなす。
-  ensureFreshSession() {
+  // responder側は自分でセッションを開始しないため、新セッション判定時のモードは呼び出し側
+  // （現在時刻から判定）が渡す。
+  ensureFreshSession(mode = "report") {
     if (!this.state.lastActivityAt || Date.now() - this.state.lastActivityAt > SESSION_GAP_MS) {
-      this._beginSession();
+      this._beginSession(mode);
     }
   }
 

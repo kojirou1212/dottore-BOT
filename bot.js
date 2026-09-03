@@ -1241,16 +1241,57 @@ function splitMessage(text, maxLength) {
 }
 
 // ─── Bot同士の直接対話（パンタローネ⇄ドットーレ）────────────────────────────
-// 12時・18時にパンタローネが挨拶を開始し、ドットーレが応答する形で、対面での
-// 会話として交わす（動作描写込み）。起承転結（起＝挨拶／承＝世間話の導入／転＝話題転換／
-// 結＝締め）で運び、上限往復数（interbot-state.jsのMAX_ROUNDS）に達するまで続ける。
-// 承・転で話す話題は、被検体についての世間話が基本だが、3割程度の確率で
-// 「今日食べたもの」という二人自身についての話題に振れる（buildFoodTopicHint）。
+// パンタローネが挨拶を開始し、ドットーレが応答する形で、対面での会話として交わす
+// （動作描写込み）。起承転結で運び、上限往復数（interbot-state.jsのMAX_ROUNDS）まで続ける。
+//
+// セッションには2モードある（interBotState.getSessionMode()）：
+//  - "report"（12時・18時）：起＝挨拶／承＝被検体の世間話の導入／転＝話題転換／結＝締め。
+//    承・転の話題は被検体ゴシップが基本だが3割で「今日食べたもの」に振れる（buildFoodTopicHint）。
+//  - "relax"（23時）：薄暗い部屋で二人がくつろぐ夜の時間。報告・ゴシップはせず、ぽつぽつとした
+//    短い会話と多めの動作描写で過ごす。起＝パンタローネが手土産持参で立ち寄る／結は同じ。
+//    中盤はRELAX_BEATSを回転させて単調化を防ぐ。
 function interBotCounterpartName() {
   return IS_PANTALONE ? "ドットーレ" : "パンタローネ";
 }
 
+// 現在のJST時刻から、開始すべき／進行中とみなすべきセッションのモードを判定する。
+// 23時台（および長引いた場合の保険で22時台）は「くつろぎ」、それ以外は通常の「報告」。
+function currentInterBotMode() {
+  const h = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
+  return (h === 22 || h === 23) ? "relax" : "report";
+}
+
+function isRelaxSession() {
+  return interBotState?.getSessionMode() === "relax";
+}
+
+// 23時のくつろぎセッションの中盤ターンに、単調なループを避けるため回転させる「入り方」の目安。
+// （8往復＝中盤12ターンが全く同じ指示だと、非推論モデルでは同じ短文の反復になりやすい）
+const RELAX_BEATS = [
+  "手土産（菓子・酒など）に手を伸ばし、味や品について短く一言添える程度に留める",
+  "部屋の暗さ・静けさ・夜であること、あるいは時間の流れの遅さに、ふと一言だけ触れる",
+  "セリフは言わず、動作描写だけでこのターンを終える（相手の様子をうかがう、姿勢を変える、視線を動かす等）",
+  "相手の直前の仕草や短い一言に、ごく短い相槌か軽い皮肉だけを返す",
+  "四百年の付き合いの中の他愛ない断片（昔の商談、昔訪れた街、以前にもこうして過ごしたこと等）に、一言だけ触れる",
+  "今は特に言うことがない、という間をそのまま出す（「……」に近い短い返し＋動作描写）",
+];
+
+// 23時のくつろぎセッション用のシーン説明。報告・ゴシップではなく「一緒に過ごすだけ」の空気。
+const RELAX_GESTURE_MENU = {
+  "パンタローネ": "背もたれに身を預ける／脚を組む／脚を組み替える／長く息をつく／杯を傾ける／指先で杯の縁をなぞる／窓の外へ視線を向ける／煙草に火を点ける／ゆっくりと煙を吐く／灰を落とす／手袋を外して卓に置く",
+  "ドットーレ": "椅子に深く沈む／脚を組む／脚を組み替える／長く息を吐く／天井を見上げる／手元の資料を閉じる／目を閉じる／頬杖をつく／指を組んで顎を乗せる／グラスを揺らす",
+};
+
+function interBotRelaxSceneHint() {
+  const cp = interBotCounterpartName();
+  const base = `【現在の状況】夜。照明を落とした薄暗い部屋で、${CHARACTER_NAME}と${cp}が向かい合ってゆっくりくつろいでいる。今夜は観測結果の報告やゴシップ話をする場ではなく、四百年来の間柄の二人が、特に何をするでもなく同じ時間を過ごすだけの場だ。会話はぽつぽつと途切れがちで構わない――むしろ沈黙、ふとした短い一言、そして仕草のほうが主役になる。セリフは短く（多くて1文、時には言わずに動作だけでもよい）、その代わり括弧書きの動作描写を必ず入れ、多めに交えること。ただし同じ仕草を繰り返さず、毎回違う種類の動作を選ぶこと。被検体の話・分析・タスクの話・仕事の話には踏み込まない。「〜する必要がある」といった業務じみた言い回しはしない。直前の${cp}のセリフや言い回しをそのまま返さないこと。`;
+  return IS_PANTALONE
+    ? `${base}\n${CHARACTER_NAME}の動作の例（毎回変えること）：${RELAX_GESTURE_MENU["パンタローネ"]}。${cp}への呼びかけは「貴方」または「ドットーレ」。くつろいだ場でも口調は常に敬語（です・ます調）を保ち、だ・である調や体言止めの言い切りにはしないこと。`
+    : `${base}\n${CHARACTER_NAME}の動作の例（毎回変えること）：${RELAX_GESTURE_MENU["ドットーレ"]}。${cp}への呼びかけは「お前」または「パンタローネ」。`;
+}
+
 function interBotSceneHint() {
+  if (isRelaxSession()) return interBotRelaxSceneHint();
   const base = `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が定期的に顔を合わせ、対面で直接話す場だ。二人はそれぞれ、この場（コミュニティ）で接している被検体たちについて観測を続けており、この対話はその観測結果を共有し合う機会でもある。ただし業務報告のような堅苦しい確認作業ではなく、四百年来の気心の知れた間柄同士が、被検体たちの話をネタに世間話・ゴシップ話として盛り上がる、くつろいだ雑談の場として運ぶこと。「〜する必要がある」「確認が必要だ」といった業務報告・タスク管理じみた言い回しを連発しないこと。話題は被検体（利用者）に関するもの、または二人自身の今日の食事の話に留め、天候・技術・文化といった被検体と無関係な世間話には広げないが、被検体の話そのものは分析対象としてではなく、気の置けない相手と面白がって話すような調子で語ること。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写（身振り・仕草など）を交えて構わない。直前の${interBotCounterpartName()}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりせず、それに対する自分なりの反応（突っ込み・茶化し・話題の転換など）で応じること。`;
   return IS_PANTALONE
     ? `${base}ドットーレへの呼びかけは「貴方」または「ドットーレ」であり、「博士」は呼びかけには使わないこと（博士は言及時のみ）。四百年来の間柄なので、他の被検体が相手の時より幾分か率直な話題や軽い皮肉を交えて構わないが、これは話す内容の話であり、口調（語尾）は常に敬語（です・ます調）を保つこと。動揺したり問い詰められたりしても、丁寧さを崩してぞんざいな言い方（だ・である調、体言止めの言い切りなど）にはならない。ドットーレが持ち出す分析的・臨床的な話題（監視・統制・観測対象の行動パターンなど）に付き合う場合も同様で、内容が冷徹・分析的になるのは構わないが、語尾までドットーレの「だ・である」調に引きずられて同化してはならない（実測で、このような話題が数往復続くと敬語が崩れていく現象が確認されている）。この対話内で自分自身の直前までの発言が万一敬語から崩れていたとしても、それを踏襲せず、この発言からは必ず敬語（です・ます調）に戻すこと。`
@@ -1320,6 +1361,11 @@ function buildInterBotGreetingHint(hour) {
       ? `${scene}\n\n初めて${counterpart}のもとを訪れる場面です。ノックをするなどして、${counterpart}がいるかどうか尋ねる、探るような第一声をどうぞ。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
       : `${scene}\n\n${counterpart}が初めてここを訪ねてきた場面から始まる。この対話の一言目となる挨拶を送れ。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
   }
+  if (isRelaxSession()) {
+    return IS_PANTALONE
+      ? `${scene}\n\n薄暗い部屋の${counterpart}のもとを訪れた場面から始めてください。今夜は手土産を持参しています（甘い菓子、つまめる軽食、上等な酒など――具体的な品は想像で構いません）。それを卓や傍らに置く、あるいは差し出す動作をさりげなく交えつつ、短く声をかけてください。大げさな挨拶や用件の説明にはせず、ふらりと立ち寄ったような調子で。1〜2文程度。動作描写を交えて、セリフ本文を出力してください。`
+      : `${scene}\n\n${counterpart}が薄暗い部屋を訪ねてきた場面から始まる。この対話の一言目を、短く、気負わず送れ。1〜2文程度。動作描写を交えて、セリフ本文を出力すること。`;
+  }
   return IS_PANTALONE
     ? `${scene}\n\n今は${hour}時（JST）。${counterpart}のもとを訪れた場面から始めてください。時間帯に合った自然な調子で構いませんが、「何時に伺った」のように時刻そのものを言葉にする必要はありません。この対話の一言目となる挨拶をどうぞ。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
     : `${scene}\n\n今は${hour}時（JST）。${counterpart}が訪ねてきた場面から始まる。時間帯に合った自然な調子で構わないが、時刻そのものを言葉にする必要はない。この対話の一言目となる挨拶を送れ。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
@@ -1333,6 +1379,18 @@ function buildInterBotReplyHint() {
     const builder = FIRST_MEETING_DOTTORE_REPLY_HINTS[replyIndex];
     if (builder) return builder(scene, counterpart);
     // 想定外の位置なら通常の応答にフォールバック
+  }
+  if (isRelaxSession()) {
+    if (interBotState?.willBeFinalSend()) {
+      return `${scene}\n\n夜も更けてきた頃合いだ。直前の${counterpart}の発言や仕草を静かに受けて、そろそろ切り上げる短い一言を送れ（起承転結の「結」）。ぶっきらぼうでよいが拒絶ではなく、「今日はここまで」という区切り。また次も、と匂わせる程度で、大げさな別れの挨拶にはしないこと。1文程度＋動作描写で、セリフ本文を出力すること。`;
+    }
+    const tlen = interBotState?.getTranscript().length ?? 0;
+    const firstReply = tlen <= 1;
+    const foodBit = firstReply
+      ? `${counterpart}が持参した手土産に軽く触れつつ（礼か、皮肉か、無言で手を伸ばすか、いずれでも）、`
+      : ``;
+    const beat = firstReply ? "" : `\n今回の入り方の目安：${RELAX_BEATS[tlen % RELAX_BEATS.length]}。`;
+    return `${scene}\n\n${foodBit}直前の${counterpart}の短い発言や仕草に、ぽつりと応じよ。話を広げず、相槌・ごく短い感想・沈黙に近い一言、あるいはセリフを言わず仕草だけ、のいずれかで。これまで使っていない種類の動作描写を必ず1つ以上入れること。多くて1文。${beat}\nセリフ本文を出力すること。`;
   }
   // 起承転結の「結」：このBotにとって今セッション最後の送信になる番は、
   // 新しい話題を広げず、対話を締めくくる一言として応じる。
@@ -1355,7 +1413,20 @@ function buildFoodTopicHint(scene, counterpart, phaseLabel = "") {
 // パンタローネ専用（initiator側のみが呼ぶため常に敬語で書く）：
 // 2往復目に必ず1回だけ使う話題（起承転結の「承」の導入）。被検体についての世間話が基本だが、
 // 3割程度の確率で「今日食べたもの」の話に振れる。
+// 23時のくつろぎセッションでinitiator（パンタローネ）が中盤に送る一言。
+// 議題を持たず、ぽつぽつとした短い発話＋動作描写で「一緒にいるだけ」の空気を保つ。
+function buildRelaxInitiatorTurnHint() {
+  const scene = interBotSceneHint();
+  const cp = interBotCounterpartName();
+  if (interBotState.willBeFinalSend()) {
+    return `${scene}\n\n夜も更けてきた頃合いです。直前の${cp}の発言や仕草を静かに受けて、今夜はそろそろ、という短い一言で区切りをつけてください（起承転結の「結」）。特に何を話したわけでもないまま、また次も、と匂わせる程度で。大げさな別れの挨拶にはしないこと。1文程度＋動作描写で、セリフ本文を出力してください。`;
+  }
+  const beat = RELAX_BEATS[(interBotState.getTranscript().length) % RELAX_BEATS.length];
+  return `${scene}\n\n直前の${cp}の短い発言や仕草に、ぽつりと応じてください。用件も議題もありません。多くて1文で、これまで使っていない種類の動作描写を必ず1つ以上入れること。\n今回の入り方の目安：${beat}。\nセリフ本文を出力してください。`;
+}
+
 function buildInterBotSubjectReportHint() {
+  if (isRelaxSession()) return buildRelaxInitiatorTurnHint();
   const scene = interBotSceneHint();
   const counterpart = interBotCounterpartName();
   if (Math.random() < 0.3) {
@@ -1377,6 +1448,7 @@ function buildInterBotSubjectReportHint() {
 // セッション中1回・かつ会話が最後から2番目の番に達してから（isSecondToLastSend）のみ許可し、
 // それ以外は直前までの話題をそのまま掘り下げる指示にする。MAX_ROUNDSの変更にも自動追従する。
 function buildInterBotFollowUpHint() {
+  if (isRelaxSession()) return buildRelaxInitiatorTurnHint();
   const scene = interBotSceneHint();
   const counterpart = interBotCounterpartName();
   const canSwitchTopic = interBotState.isSecondToLastSend() && !interBotState.hasSwitchedTopic();
@@ -1483,7 +1555,9 @@ async function handleInterBotMessage(message) {
   const content = message.content.trim();
   if (!content) return;
 
-  interBotState.ensureFreshSession();
+  // responder側は自分でセッションを開始しないため、新セッションと判定される場合の
+  // モードは現在時刻から推定して渡す（23時台＝くつろぎ）。
+  interBotState.ensureFreshSession(currentInterBotMode());
   interBotState.recordReceived(interBotCounterpartName(), content);
 
   await continueInterBotSession();
@@ -1519,10 +1593,11 @@ function startScheduler() {
       console.log(`[Scheduler] ステータス更新 (${hour}時 JST): ${statusManager.state.activity}`);
     }
 
-    // ── Bot同士の対話セッション開始（initiator側のみ・12時/18時）──
-    if (interBotState && interBotRole === "initiator" && (hour === 12 || hour === 18)) {
-      interBotState.startSession();
-      console.log(`[InterBot] セッション開始 (${hour}時 JST)`);
+    // ── Bot同士の対話セッション開始（initiator側のみ・12時/18時＝報告、23時＝くつろぎ）──
+    if (interBotState && interBotRole === "initiator" && (hour === 12 || hour === 18 || hour === 23)) {
+      const mode = hour === 23 ? "relax" : "report";
+      interBotState.startSession(mode);
+      console.log(`[InterBot] セッション開始 (${hour}時 JST・${mode})`);
       sendInterBotMessage(buildInterBotGreetingHint(hour))
         .catch(err => console.error("[InterBot] 挨拶送信エラー:", err.message));
     }
