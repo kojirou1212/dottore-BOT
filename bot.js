@@ -233,9 +233,23 @@ function trackChannelTopic(message) {
 // 渡すと「博士を制止するなど」のように三人称の他人事として処理してしまう問題があった（実測で確認）。
 // パンタローネにとっては同じ呼称が「別人＝ドットーレ」を指すため、ドットーレ自身の視点でのみ適用する。
 // トラッキング元データ（channelTopics）自体は変換せず、AIへ渡す直前の文字列にのみ適用する。
+//
+// あわせて、被検体がパンタローネを呼ぶ愛称「富者（様/殿/さん）」も「あいつ」へ変換する。
+// これを残すとドットーレまで「富者様」と敬称付きで呼んでしまい、傲慢なキャラと矛盾する
+// （Bot同士の直接対話では「富者殿」は正規の呼び名なので、そちらでは変換しない＝この関数を通さない）。
 function withDottoreSelfReference(text) {
   if (IS_PANTALONE) return text;
-  return text.replace(/博士|ドットーレ|[Dd]ottore/g, "私");
+  return text
+    .replace(/博士|ドットーレ|[Dd]ottore/g, "私")
+    .replace(/富者(?:様|殿|さん|君)?/g, "あいつ");
+}
+
+// ドットーレの独り言系の出力に「富者（様/殿/さん）」が残った場合に「あいつ」へ均す。
+// 入力スニペットの変換だけでは、モデルが語彙として「富者」を補完してくることがあるため、
+// 送信直前にもう一段かける（応用mutter・テキストmutter専用。Bot同士の対話には適用しない）。
+function stripPantaloneEpithet(text) {
+  if (IS_PANTALONE || !text) return text;
+  return text.replace(/富者(?:様|殿|さん|君)?/g, "あいつ");
 }
 
 function getRecentTopicsHint() {
@@ -1597,10 +1611,11 @@ function startTextMutter() {
       `${topicsHint}\n\n` +
       `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、上記の最近の会話の流れに割り込むように自発的に一言コメントせよ。` +
       `誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構わない。1〜2文、80文字程度。` +
+      (IS_PANTALONE ? `` : `パンタローネに言及する場合は「お前」または「あいつ」と呼び、「富者」「富者様」等の敬称・愛称は使わないこと。`) +
       `行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力。`;
 
     try {
-      const text = await aiHandler.generateSimple(prompt, 120);
+      const text = stripPantaloneEpithet(await aiHandler.generateSimple(prompt, 120));
       const targetCh = zatsuChannelId || [...targetChannelIds][0];
       if (!text || !targetCh) return;
       const ch = await client.channels.fetch(targetCh).catch(() => null);
@@ -1712,10 +1727,11 @@ async function handleCrossMutter(message) {
     `以下は、パンタローネが被検体と交わしている会話の断片だ。\n${snippet}\n\n` +
     `ドットーレ（冷静・傲慢・知的な研究者）として、この会話に割り込むように自発的に一言コメントせよ。誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構わない。` +
     `以下の3拍子の構成にすること：①話題をふてぶてしく一蹴する第一声（「〜如きに何の意味がある」「くだらん」等）→②「……いや」「もっとも」「だが」のような一言で一転し、実は本気で興味を持っていたことを覗かせる→③最後は必ず、自分自身の研究・観察・記録の話にすり替えて着地する（例：「私の研究テーマの一つでもある」「私の記録にも近い反応がある」）。` +
+    `パンタローネに言及する場合は「お前」または「あいつ」と呼ぶこと。「富者」「富者様」等の敬称・愛称は絶対に使わないこと。` +
     `2〜3文、100文字程度。行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力。セリフ全体を「」で囲まないこと（括弧書きの動作描写以外は、地の文のまま出力すること）。`;
 
   try {
-    const text = await aiHandler.generateSimple(prompt, 180);
+    const text = stripPantaloneEpithet(await aiHandler.generateSimple(prompt, 180));
     if (text) {
       lastCrossMutterAt = Date.now();
       await message.channel.send(text);
