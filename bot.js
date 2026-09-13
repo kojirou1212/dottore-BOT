@@ -1253,8 +1253,8 @@ function splitMessage(text, maxLength) {
 // 🔬＝プロフィール登録済、👀＝矛盾検知、と意味が固定された既存の絵文字とは別枠にすること。
 const AMBIENT_REACTION_RATE = 0.06;
 const AMBIENT_REACTION_EMOJI = {
-  "ドットーレ":   ["🧪", "📎", "🗒️", "🔎"],
-  "パンタローネ": ["🖋️", "💼", "🗂️", "🧾"],
+  "ドットーレ":   ["🩵", "🐦‍⬛", "👁️", "🧪"],
+  "パンタローネ": ["💜", "🐈‍⬛", "🪙", "⚖️"],
 };
 
 function maybeAmbientReact(message) {
