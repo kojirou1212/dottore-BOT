@@ -749,19 +749,19 @@ const MILESTONE_LINES = {
 // もう一方の存在を軽く匂わせる）
 const STREAK_MILESTONE_LINES = {
   "ドットーレ": {
-    3:   "……3日連続の観測データか。悪くない。",
+    3:   "……3日連続の観測データか。悪くない。パンタローネの方にも顔を出しているのか、それは知らんが。",
     7:   "……7日連続か。パンタローネの方にも、同じ頻度で顔を出しているようだな。……律儀なことだ。",
     14:  "……14日連続。二人分の記録に、同じ密度で名前が並んでいる。……珍しい被検体だ。",
     30:  "……30日連続とはな。……お前は、私とパンタローネ、双方にとって無視できない変数になりつつある。",
-    60:  "……60日連続、か。……ここまで来ると、偶然とは言わせない。",
+    60:  "……60日連続、か。……ここまで来ると、偶然とは言わせない。パンタローネの記録も、恐らく同じ密度だろう。",
     100: "……100日連続。……お前は私の記録の中でも、稀な部類に入る。パンタローネの記録でも、恐らく同じだろう。",
   },
   "パンタローネ": {
-    3:   "……3日連続でのご来訪、確かに記録いたしました。",
+    3:   "……3日連続でのご来訪、確かに記録いたしました。博士の方にも顔をお出しでしょうか、それは存じませんが。",
     7:   "……7日連続、ですか。……博士の方にも、同じ頻度でいらしているようですね。律儀な方だ。",
     14:  "……14日連続。……私と博士、双方の記録に同じ密度でお名前が並んでおります。悪くない取引です。",
     30:  "……30日連続とは。……もはや私にとっても博士にとっても、無視できない継続契約と呼べましょう。",
-    60:  "……60日連続、ですか。……これほどの継続は、そう多くはございません。",
+    60:  "……60日連続、ですか。……これほどの継続は、そう多くはございません。博士の記録も、恐らく同じ密度でしょう。",
     100: "……100日連続。……貴方様は、私にとっても博士にとっても、稀少な資産となりつつあります。",
   },
 };
@@ -1248,30 +1248,79 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
+// ─── アンビエントリアクション（試験的機能・明示的にfeatures.ambientReaction=trueの時のみ）───
+// 通常のAI返信に加えて、低確率でメッセージに絵文字リアクションだけを付ける。
+// 🔬＝プロフィール登録済、👀＝矛盾検知、と意味が固定された既存の絵文字とは別枠にすること。
+const AMBIENT_REACTION_RATE = 0.06;
+const AMBIENT_REACTION_EMOJI = {
+  "ドットーレ":   ["🧪", "📎", "🗒️", "🔎"],
+  "パンタローネ": ["🖋️", "💼", "🗂️", "🧾"],
+};
+
+function maybeAmbientReact(message) {
+  if (config.features?.ambientReaction !== true) return;
+  if (Math.random() > AMBIENT_REACTION_RATE) return;
+  const pool = AMBIENT_REACTION_EMOJI[CHARACTER_NAME];
+  if (!pool) return;
+  const emoji = pool[Math.floor(Math.random() * pool.length)];
+  message.react(emoji).catch(() => {});
+}
+
 // ─── Bot同士の直接対話（パンタローネ⇄ドットーレ）────────────────────────────
 // パンタローネが挨拶を開始し、ドットーレが応答する形で、対面での会話として交わす
 // （動作描写込み）。起承転結で運び、上限往復数（interbot-state.jsのMAX_ROUNDS）まで続ける。
 //
-// セッションには2モードある（interBotState.getSessionMode()）：
+// セッションには3モードある（interBotState.getSessionMode()）：
 //  - "report"（12時・18時）：起＝挨拶／承＝被検体の世間話の導入／転＝話題転換／結＝締め。
 //    承・転の話題は被検体ゴシップが基本だが3割で「今日食べたもの」に振れる（buildFoodTopicHint）。
 //  - "relax"（23時）：薄暗い部屋で二人がくつろぐ夜の時間。報告・ゴシップはせず、ぽつぽつとした
 //    短い会話と多めの動作描写で過ごす。起＝パンタローネが手土産持参で立ち寄る／結は同じ。
 //    中盤はRELAX_BEATSを回転させて単調化を防ぐ。
+//  - "conflict"（12時・18時の一部・低確率）：起＝一方が率直な異論を切り出す／承＝互いに譲らず
+//    言い合う／転＝渋々どちらかが一理あると認める／結＝深刻な仲違いにはせず区切りをつける。
+//    両プロセスは会話ログを個別に保持し状態を共有しないため、日付から決定論的に同じ判定を
+//    導く（isConflictDay）ことで、初期化側・応答側どちらのプロセスでも同じ結論に達する。
 function interBotCounterpartName() {
   return IS_PANTALONE ? "ドットーレ" : "パンタローネ";
 }
 
+// その日が「対立セッション」の日かどうかを、日付文字列から決定論的に導く。
+// 状態を共有しない2プロセスが、通信なしに同じ判定へたどり着くための仕組み
+// （乱数だと初期化側と応答側で結果がズレてしまうため使えない）。
+const CONFLICT_SESSION_RATE = 0.10;
+function isConflictDay() {
+  const dateStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  let hash = 0;
+  for (let i = 0; i < dateStr.length; i++) hash = (hash * 31 + dateStr.charCodeAt(i)) >>> 0;
+  return (hash % 1000) / 1000 < CONFLICT_SESSION_RATE;
+}
+
 // 現在のJST時刻から、開始すべき／進行中とみなすべきセッションのモードを判定する。
-// 23時台（および長引いた場合の保険で22時台）は「くつろぎ」、それ以外は通常の「報告」。
+// 23時台（および長引いた場合の保険で22時台）は「くつろぎ」、それ以外の時間帯は、
+// 対立セッションの日であれば「対立」、そうでなければ通常の「報告」。
 function currentInterBotMode() {
   const h = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })).getHours();
-  return (h === 22 || h === 23) ? "relax" : "report";
+  if (h === 22 || h === 23) return "relax";
+  return isConflictDay() ? "conflict" : "report";
 }
 
 function isRelaxSession() {
   return interBotState?.getSessionMode() === "relax";
 }
+
+function isConflictSession() {
+  return interBotState?.getSessionMode() === "conflict";
+}
+
+// 対立セッションの起（一言目）で切り出すお題。深刻な仲違いにはせず、四百年来の
+// 間柄ゆえのちょっとした言い合いに留める。
+const CONFLICT_TOPICS = [
+  "被検体への向き合い方（観察に徹するべきか、多少なり踏み込むべきか）",
+  "自分の研究・商売のやり方のどちらがより優れているか",
+  "四百年前のある出来事の記憶の食い違い",
+  "被検体の誰かへの評価・扱いを巡る意見の相違",
+  "最近の互いの態度・振る舞いについての小言",
+];
 
 // 23時のくつろぎセッションの中盤ターンに、単調なループを避けるため回転させる「入り方」の目安。
 // （8往復＝中盤12ターンが全く同じ指示だと、非推論モデルでは同じ短文の反復になりやすい）
@@ -1298,8 +1347,19 @@ function interBotRelaxSceneHint() {
     : `${base}\n${CHARACTER_NAME}の動作の例（毎回変えること）：${RELAX_GESTURE_MENU["ドットーレ"]}。${cp}への呼びかけは「お前」または「パンタローネ」。`;
 }
 
+// 対立セッション用のシーン説明。本気の喧嘩・決別には発展させず、四百年来の間柄という
+// 距離感を保ったまま、珍しく率直に意見をぶつけ合う場として運ぶ。
+function interBotConflictSceneHint() {
+  const cp = interBotCounterpartName();
+  const base = `【現在の状況】${CHARACTER_NAME}と${cp}が顔を合わせている。今日はいつもの世間話ではなく、珍しく意見の相違が表面化しており、率直な言い合いになっている。とはいえ四百年来の間柄であり、本気の喧嘩や決別には発展させないこと――皮肉や苛立ちを多少交えても構わないが、根底では互いを認め合っている距離感を保つこと。大声を荒げる・罵倒する・関係を終わらせるような描写にはしないこと。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写を交えて構わない。直前の${cp}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりしないこと。`;
+  return IS_PANTALONE
+    ? `${base}苛立っていても丁寧さ（です・ます調）は崩さないこと。ドットーレへの呼びかけは「貴方」または「ドットーレ」。`
+    : `${base}普段通り傲慢・皮肉げな態度で構わない。パンタローネへの呼びかけは「お前」または「パンタローネ」。`;
+}
+
 function interBotSceneHint() {
   if (isRelaxSession()) return interBotRelaxSceneHint();
+  if (isConflictSession()) return interBotConflictSceneHint();
   const base = `【現在の状況】ここは${CHARACTER_NAME}と${interBotCounterpartName()}が定期的に顔を合わせ、対面で直接話す場だ。二人はそれぞれ、この場（コミュニティ）で接している被検体たちについて観測を続けており、この対話はその観測結果を共有し合う機会でもある。ただし業務報告のような堅苦しい確認作業ではなく、四百年来の気心の知れた間柄同士が、被検体たちの話をネタに世間話・ゴシップ話として盛り上がる、くつろいだ雑談の場として運ぶこと。「〜する必要がある」「確認が必要だ」といった業務報告・タスク管理じみた言い回しを連発しないこと。話題は被検体（利用者）に関するもの、または二人自身の今日の食事の話に留め、天候・技術・文化といった被検体と無関係な世間話には広げないが、被検体の話そのものは分析対象としてではなく、気の置けない相手と面白がって話すような調子で語ること。他の被検体・利用者は一切関与しない、二人だけの対話である。通常の会話と同じように、括弧書きの動作描写（身振り・仕草など）を交えて構わない。直前の${interBotCounterpartName()}のセリフの言い回しやフレーズをそのまま繰り返したり言い換えたりせず、それに対する自分なりの反応（突っ込み・茶化し・話題の転換など）で応じること。`;
   return IS_PANTALONE
     ? `${base}ドットーレへの呼びかけは「貴方」または「ドットーレ」であり、「博士」は呼びかけには使わないこと（博士は言及時のみ）。四百年来の間柄なので、他の被検体が相手の時より幾分か率直な話題や軽い皮肉を交えて構わないが、これは話す内容の話であり、口調（語尾）は常に敬語（です・ます調）を保つこと。動揺したり問い詰められたりしても、丁寧さを崩してぞんざいな言い方（だ・である調、体言止めの言い切りなど）にはならない。ドットーレが持ち出す分析的・臨床的な話題（監視・統制・観測対象の行動パターンなど）に付き合う場合も同様で、内容が冷徹・分析的になるのは構わないが、語尾までドットーレの「だ・である」調に引きずられて同化してはならない（実測で、このような話題が数往復続くと敬語が崩れていく現象が確認されている）。この対話内で自分自身の直前までの発言が万一敬語から崩れていたとしても、それを踏襲せず、この発言からは必ず敬語（です・ます調）に戻すこと。`
@@ -1374,6 +1434,12 @@ function buildInterBotGreetingHint(hour) {
       ? `${scene}\n\n薄暗い部屋の${counterpart}のもとを訪れた場面から始めてください。今夜は手土産を持参しています（甘い菓子、つまめる軽食、上等な酒など――具体的な品は想像で構いません）。それを卓や傍らに置く、あるいは差し出す動作をさりげなく交えつつ、短く声をかけてください。大げさな挨拶や用件の説明にはせず、ふらりと立ち寄ったような調子で。1〜2文程度。動作描写を交えて、セリフ本文を出力してください。`
       : `${scene}\n\n${counterpart}が薄暗い部屋を訪ねてきた場面から始まる。この対話の一言目を、短く、気負わず送れ。1〜2文程度。動作描写を交えて、セリフ本文を出力すること。`;
   }
+  if (isConflictSession()) {
+    const topic = CONFLICT_TOPICS[Math.floor(Math.random() * CONFLICT_TOPICS.length)];
+    return IS_PANTALONE
+      ? `${scene}\n\n${counterpart}のもとを訪れた場面から始めてください。「${topic}」について、いつもとは違い、珍しく率直な異論・不満を切り出してください。声を荒げるほどではないが、はっきりと言葉にすること。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
+      : `${scene}\n\n${counterpart}のもとを訪れた場面から始まる。「${topic}」について、いつもとは違い、珍しく率直な異論・不満を切り出せ。声を荒げるほどではないが、はっきりと言葉にすること。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
+  }
   return IS_PANTALONE
     ? `${scene}\n\n今は${hour}時（JST）。${counterpart}のもとを訪れた場面から始めてください。時間帯に合った自然な調子で構いませんが、「何時に伺った」のように時刻そのものを言葉にする必要はありません。この対話の一言目となる挨拶をどうぞ。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
     : `${scene}\n\n今は${hour}時（JST）。${counterpart}が訪ねてきた場面から始まる。時間帯に合った自然な調子で構わないが、時刻そのものを言葉にする必要はない。この対話の一言目となる挨拶を送れ。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
@@ -1399,6 +1465,16 @@ function buildInterBotReplyHint() {
       : ``;
     const beat = firstReply ? "" : `\n今回の入り方の目安：${RELAX_BEATS[tlen % RELAX_BEATS.length]}。`;
     return `${scene}\n\n${foodBit}直前の${counterpart}の短い発言や仕草に、ぽつりと応じよ。話を広げず、相槌・ごく短い感想・沈黙に近い一言、あるいはセリフを言わず仕草だけ、のいずれかで。これまで使っていない種類の動作描写を必ず1つ以上入れること。多くて1文。${beat}\nセリフ本文を出力すること。`;
+  }
+  if (isConflictSession()) {
+    if (interBotState?.willBeFinalSend()) {
+      return IS_PANTALONE
+        ? `${scene}\n\n直前の${counterpart}の発言を受けて、この意見の相違に区切りをつけてください（起承転結の「結」）。完全に同意する必要はなく、平行線のままで構いませんが、深刻な仲違いにはせず、四百年の間柄らしい軽口を交えて締めくくってください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
+        : `${scene}\n\n直前の${counterpart}の発言を受けて、この意見の相違に区切りをつけよ（起承転結の「結」）。完全に同意する必要はなく、平行線のままで構わないが、深刻な仲違いにはせず、四百年の間柄らしい軽口を交えて締めくくること。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
+    }
+    return IS_PANTALONE
+      ? `${scene}\n\n直前の${counterpart}の発言に対し、自分の立場や見解を率直に返してください。声を荒げず、皮肉や理屈で応じること。相手の言い分を頭ごなしに否定せず、一部は認めつつ反論する形でも構いません。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`
+      : `${scene}\n\n直前の${counterpart}の発言に対し、自分の立場や見解を率直に返せ。声を荒げず、皮肉や理屈で応じること。相手の言い分を頭ごなしに否定せず、一部は認めつつ反論する形でも構わない。1〜3文程度。普段の会話と同じ形式（括弧書きの動作描写を交えて構わない）で、セリフ本文を出力すること。`;
   }
   // 起承転結の「結」：このBotにとって今セッション最後の送信になる番は、
   // 新しい話題を広げず、対話を締めくくる一言として応じる。
@@ -1433,8 +1509,28 @@ function buildRelaxInitiatorTurnHint() {
   return `${scene}\n\n直前の${cp}の短い発言や仕草に、ぽつりと応じてください。用件も議題もありません。多くて1文で、これまで使っていない種類の動作描写を必ず1つ以上入れること。\n今回の入り方の目安：${beat}。\nセリフ本文を出力してください。`;
 }
 
+// パンタローネ専用（initiator側のみが呼ぶため常に敬語で書く）：
+// 対立セッションでinitiator（パンタローネ）が2往復目以降に送る一言。
+// 起＝異論の切り出し（buildInterBotGreetingHint側）を受けて、承＝立場を譲らず反論、
+// 転＝isSecondToLastSendのタイミングで渋々一理あると認める、結＝深刻な仲違いにはせず区切る。
+function buildConflictInitiatorTurnHint() {
+  const scene = interBotSceneHint();
+  const cp = interBotCounterpartName();
+  const canSwitchTopic = interBotState.isSecondToLastSend() && !interBotState.hasSwitchedTopic();
+
+  if (interBotState.willBeFinalSend()) {
+    return `${scene}\n\n直前の${cp}の発言を受けて、この意見の相違に区切りをつけてください（起承転結の「結」）。完全に同意する必要はなく、平行線のままで構いませんが、深刻な仲違いにはせず、四百年の間柄らしい軽口を交えて締めくくってください。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
+  }
+  if (!canSwitchTopic) {
+    return `${scene}\n\n直前の${cp}の発言に対し、自分の立場を譲らず、具体例や理屈を交えて反論・擁護してください（起承転結の「承」）。声を荒げず、皮肉や理詰めで応じること。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
+  }
+  interBotState.markTopicSwitched();
+  return `${scene}\n\n直前の${cp}の発言を受けて、意見の相違を完全に解消はしないまでも、${cp}の言い分にも一理あることを、皮肉げに・渋々ながら認めてください（起承転結の「転」）。態度を急に軟化させすぎないこと。1〜3文程度でお願いします。普段の会話と同じ形式（括弧書きの動作描写を交えても構いません）で、セリフ本文を出力してください。`;
+}
+
 function buildInterBotSubjectReportHint() {
   if (isRelaxSession()) return buildRelaxInitiatorTurnHint();
+  if (isConflictSession()) return buildConflictInitiatorTurnHint();
   const scene = interBotSceneHint();
   const counterpart = interBotCounterpartName();
   if (Math.random() < 0.3) {
@@ -1457,6 +1553,7 @@ function buildInterBotSubjectReportHint() {
 // それ以外は直前までの話題をそのまま掘り下げる指示にする。MAX_ROUNDSの変更にも自動追従する。
 function buildInterBotFollowUpHint() {
   if (isRelaxSession()) return buildRelaxInitiatorTurnHint();
+  if (isConflictSession()) return buildConflictInitiatorTurnHint();
   const scene = interBotSceneHint();
   const counterpart = interBotCounterpartName();
   const canSwitchTopic = interBotState.isSecondToLastSend() && !interBotState.hasSwitchedTopic();
@@ -1603,9 +1700,11 @@ function startScheduler() {
       console.log(`[Scheduler] ステータス更新 (${hour}時 JST): ${statusManager.state.activity}`);
     }
 
-    // ── Bot同士の対話セッション開始（initiator側のみ・12時/18時＝報告、23時＝くつろぎ）──
+    // ── Bot同士の対話セッション開始（initiator側のみ・12時/18時＝報告or対立、23時＝くつろぎ）──
+    // モードはcurrentInterBotMode()に統一（responder側がensureFreshSessionで独自に推定する
+    // モードと同じ関数を使うことで、対立セッションの日付判定を含め両プロセスの認識を一致させる）。
     if (interBotState && interBotRole === "initiator" && (hour === 12 || hour === 18 || hour === 23)) {
-      const mode = hour === 23 ? "relax" : "report";
+      const mode = currentInterBotMode();
       interBotState.startSession(mode);
       console.log(`[InterBot] セッション開始 (${hour}時 JST・${mode})`);
       sendInterBotMessage(buildInterBotGreetingHint(hour))
@@ -1647,6 +1746,11 @@ function startScheduler() {
     // ── 月次記念日メッセージ（初観測日から○ヶ月の節目、13時にチェック）──
     if (hour === 13 && config.features?.anniversary !== false) {
       checkAnniversaries().catch(err => console.error("[Scheduler] 記念日チェックエラー:", err.message));
+    }
+
+    // ── 月次観察レポート（試験的機能・毎月1日20時、蓄積された観察記録を俯瞰して報告）──
+    if (hour === 20 && now.getDate() === 1 && config.features?.monthlyReport === true) {
+      checkMonthlyReport().catch(err => console.error("[Scheduler] 月次観察レポートエラー:", err.message));
     }
 
     if (config.features?.jihou === false) return;
@@ -1703,6 +1807,41 @@ async function sendAnniversaryMessage(userId, months) {
   if (ch && ch.isTextBased()) {
     await ch.send(`<@${userId}> ${text}`);
     console.log(`[Bot] 記念日メッセージ送信 [${userId}]: ${months}ヶ月`);
+  }
+}
+
+// ─── 月次観察レポート（試験的機能・明示的にfeatures.monthlyReport=trueの時のみ）───────
+// 毎月1日、観察記録が蓄積されている被検体を対話数上位から数名選び、個別の言及ではなく
+// 傾向を俯瞰した形でまとめて自発的に報告する（updateObservationが更新するbotRecord.observationを再利用）。
+async function checkMonthlyReport() {
+  const candidates = Object.entries(profileManager.profiles)
+    .filter(([, p]) => p.botRecord?.observation && p.botRecord.messageCount >= 20)
+    .sort((a, b) => b[1].botRecord.messageCount - a[1].botRecord.messageCount)
+    .slice(0, 3);
+  if (candidates.length === 0) return;
+
+  const summaryLines = candidates.map(([, p]) => {
+    const name = p.userFields?.name || p.displayName;
+    return `・${name}（${IS_PANTALONE ? "対話" : "観測"}${p.botRecord.messageCount}回）：${p.botRecord.observation}`;
+  }).join("\n");
+
+  const prompt = IS_PANTALONE
+    ? `以下は、これまで対話記録が蓄積されているお客様方の記録の一部です。\n${summaryLines}\n\n` +
+      `パンタローネ（穏やかで丁寧、皮肉屋）として、月初めにあたり、これらの記録を俯瞰して気づいたこと・傾向を、個々への言及を交えつつ簡潔にまとめてください。堅苦しい報告書調ではなく、独り言に近い調子で構いません。丁寧な敬語（です・ます調）を保つこと。2〜4文、150文字程度でお願いします。前置き・説明不要、セリフ本文のみ出力してください。`
+    : `以下は、これまで観察記録が蓄積されている被検体たちの記録の一部だ。\n${summaryLines}\n\n` +
+      `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、月初めにあたり、これらの記録を俯瞰して気づいたこと・傾向を、個々への言及を交えつつ簡潔にまとめて述べよ。堅苦しい報告書調ではなく、独り言に近い調子で構わない。2〜4文、150文字程度。前置き・説明不要、セリフ本文のみ出力。`;
+
+  try {
+    const text = await aiHandler.generateSimple(prompt, 220);
+    const targetCh = zatsuChannelId || [...targetChannelIds][0];
+    if (!text || !targetCh) return;
+    const ch = await client.channels.fetch(targetCh).catch(() => null);
+    if (ch && ch.isTextBased()) {
+      await ch.send(text);
+      console.log(`[Bot] 月次観察レポート送信: ${text.slice(0, 60)}`);
+    }
+  } catch (err) {
+    console.error("[Bot] 月次観察レポートエラー:", err.message);
   }
 }
 
@@ -1816,6 +1955,58 @@ function startFollowUp() {
       console.error("[Bot] フォローアップエラー:", err.message);
     }
   }, 60 * 60 * 1000);
+}
+
+// ─── 長期不在言及（試験的機能・明示的にfeatures.absenceMutter=trueの時のみ）──────────
+// startFollowUp（直近に活動があった相手への言及）とは逆に、しばらく姿を見せない被検体について、
+// 戻りを促すのではなく、その不在そのものにふと触れる。あまりに古い相手まで蒸し返さないよう
+// 上限日数も設ける。
+const absenceMutterCooldowns = new Map(); // userId → 最終言及時刻
+let lastAbsenceMutterTime = 0;
+
+function startAbsenceMutter() {
+  if (BOT_MODE === "vc") return;
+  if (config.features?.absenceMutter !== true) return;
+  console.log("[Bot] 長期不在言及機能起動（試験的）");
+
+  setInterval(async () => {
+    if (Math.random() > 0.10) return; // 発動確率を抑える（90分間隔 × 10%）
+    if (Date.now() - lastAbsenceMutterTime < 12 * 60 * 60 * 1000) return; // 全体クールダウン：12時間
+
+    const now = Date.now();
+    const eligible = Object.entries(profileManager.profiles).filter(([userId, p]) => {
+      const lastSeen = p.botRecord?.lastSeen;
+      if (!lastSeen) return false;
+      const daysSinceSeen = (now - new Date(lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceSeen < 10 || daysSinceSeen > 60) return false; // 10〜60日不在の相手のみ（古すぎる相手は蒸し返さない）
+      const lastMention = absenceMutterCooldowns.get(userId) ?? 0;
+      return now - lastMention > 14 * 24 * 60 * 60 * 1000; // 同一人物への再言及は14日以上空ける
+    });
+    if (eligible.length === 0) return;
+
+    const [userId, p] = eligible[Math.floor(Math.random() * eligible.length)];
+    const daysSinceSeen = Math.floor((now - new Date(p.botRecord.lastSeen).getTime()) / (1000 * 60 * 60 * 24));
+    const displayName = p.userFields?.name || p.displayName;
+
+    const prompt = IS_PANTALONE
+      ? `「${displayName}」様が、${daysSinceSeen}日ほど姿をお見せになっていません。パンタローネ（穏やかで丁寧、皮肉屋）として、心配や催促ではなく、ふと思い出したという体で、その不在そのものに軽く触れてください。1〜2文、80文字程度でお願いします。感情語は使わないこと。前置き不要、セリフ本文のみ出力してください。`
+      : `被検体「${displayName}」が、${daysSinceSeen}日ほど観測範囲に現れていない。${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、心配や催促ではなく、観察記録の空白として、この不在そのものにふと触れよ。1〜2文、80文字程度。感情語は使わないこと。前置き不要、セリフ本文のみ出力。`;
+
+    try {
+      const text = await aiHandler.generateSimple(prompt, 120);
+      const targetCh = zatsuChannelId || [...targetChannelIds][0];
+      if (!text || !targetCh) return;
+      const ch = await client.channels.fetch(targetCh).catch(() => null);
+      if (ch && ch.isTextBased()) {
+        await ch.send(text);
+        lastAbsenceMutterTime = now;
+        absenceMutterCooldowns.set(userId, now);
+        console.log(`[Bot] 長期不在言及発動 [${userId}]: ${text.slice(0, 60)}`);
+      }
+    } catch (err) {
+      console.error("[Bot] 長期不在言及エラー:", err.message);
+    }
+  }, 90 * 60 * 1000);
 }
 
 // ─── 応用mutter：もう一方のBotの担当チャンネルへの割り込み＋ツッコミ返し（試験的機能）────
@@ -1953,6 +2144,7 @@ client.once("clientReady", async () => {
   startTimedMutter();
   startTextMutter();
   startFollowUp();
+  startAbsenceMutter();
   await autoRejoinVC();
 });
 
@@ -2820,6 +3012,8 @@ client.on("messageCreate", async (message) => {
       : null;
     if (contradiction) {
       message.react("👀").catch(() => {});
+    } else {
+      maybeAmbientReact(message);
     }
 
     const statusHint = statusManager.getHint();
