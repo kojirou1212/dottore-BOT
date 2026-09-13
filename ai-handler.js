@@ -44,6 +44,13 @@ class AIHandler {
     }
   }
 
+  // Grok側が生成終了トークン等（<|eos|>、<|endoftext|>等）を文字列としてそのまま
+  // 出力してしまうことがある（特にフォールバック先のミニモデルで確認）ため、
+  // レスポンス本文に紛れ込んだそれらを除去する。
+  _stripSpecialTokens(text) {
+    return text.replace(/<\|[a-zA-Z0-9_]+\|>/g, "").trim();
+  }
+
   // 503/429など一時的エラー用リトライ付きAPI呼び出し
   async _callWithRetry(fn, maxRetries = 3) {
     let lastError;
@@ -127,7 +134,8 @@ class AIHandler {
         throw new Error(`API error ${code}: ${msg}`);
       }
 
-      const text = data.choices?.[0]?.message?.content?.trim();
+      const rawText = data.choices?.[0]?.message?.content?.trim();
+      const text = rawText ? this._stripSpecialTokens(rawText) : rawText;
       if (!text) {
         const finishReason = data.choices?.[0]?.finish_reason ?? "UNKNOWN";
         console.warn(`[AIHandler] 空応答 finish_reason=${finishReason}`);
@@ -212,7 +220,8 @@ class AIHandler {
         throw new Error(`API error ${code}: ${msg}`);
       }
 
-      const text = data.choices?.[0]?.message?.content?.trim();
+      const rawText = data.choices?.[0]?.message?.content?.trim();
+      const text = rawText ? this._stripSpecialTokens(rawText) : rawText;
       if (!text) {
         const finishReason = data.choices?.[0]?.finish_reason ?? "UNKNOWN";
         if (!isRetry) return callGrok(model, true);
@@ -263,7 +272,8 @@ class AIHandler {
       }
       const data = await res.json();
       if (!res.ok) throw new Error(`API error ${res.status}: ${data.error?.message ?? res.statusText}`);
-      const text = data.choices?.[0]?.message?.content?.trim();
+      const rawText = data.choices?.[0]?.message?.content?.trim();
+      const text = rawText ? this._stripSpecialTokens(rawText) : rawText;
       if (!text) throw new Error("空応答");
       return text;
     }, 1);
