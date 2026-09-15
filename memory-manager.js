@@ -50,6 +50,17 @@ class MemoryManager {
     return (this.data[userId]?.entries ?? []).slice();
   }
 
+  // ─── 自発フォローアップ済みフラグ（startFollowUp用）──────────────────────
+  // 一度プロアクティブに話題へ出した記憶は、同じ話題を何度も蒸し返さないよう
+  // 以降のフォローアップ抽選から除外する（通常の会話コンテキスト＝formatForContext
+  // には引き続き含まれるため、話題として自然に参照されること自体は妨げない）。
+  markFollowedUp(userId, text) {
+    const entry = this.data[userId]?.entries.find(e => e.text === text);
+    if (!entry) return;
+    entry.followedUp = true;
+    this.save();
+  }
+
   clearMemories(userId) {
     if (!this.data[userId]) return false;
     this.data[userId].entries = [];

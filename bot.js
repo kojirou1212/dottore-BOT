@@ -1933,7 +1933,7 @@ function startFollowUp() {
 
     const now = Date.now();
     const eligible = Object.entries(profileManager.profiles).filter(([userId, p]) => {
-      const memories = memoryManager.getMemories(userId);
+      const memories = memoryManager.getMemories(userId).filter(m => !m.followedUp);
       if (memories.length === 0) return false;
       const lastSeen = p.botRecord?.lastSeen;
       if (!lastSeen) return false;
@@ -1944,15 +1944,20 @@ function startFollowUp() {
     });
     if (eligible.length === 0) return;
 
-    const [userId] = eligible[Math.floor(Math.random() * eligible.length)];
-    const memories = memoryManager.getMemories(userId);
+    const [userId, p] = eligible[Math.floor(Math.random() * eligible.length)];
+    const memories = memoryManager.getMemories(userId).filter(m => !m.followedUp);
     const memoryText = memories[Math.floor(Math.random() * memories.length)].text;
+    const displayName = p.userFields?.name || p.displayName;
 
-    const prompt =
-      `以下は被検体について${CHARACTER_NAME}が記録していた記憶データの一つだ。「${memoryText}」\n\n` +
-      `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、ふと思い出したかのようにこの件へ触れ、被検体へ向けて一言言及せよ。` +
-      `催促や心配ではなく、観察・経過確認のニュアンスで。1〜2文、80文字程度。感情語は使わないこと。` +
-      `前置き・説明不要、セリフ本文のみ出力。`;
+    const prompt = IS_PANTALONE
+      ? `以下は「${displayName}」様についてパンタローネが記録していた記憶データの一つです。「${memoryText}」\n\n` +
+        `パンタローネ（穏やかで丁寧、皮肉屋）として、ふと思い出したという体で、この件へ軽く触れてください。` +
+        `催促や心配ではなく、経過を気にかけている程度のニュアンスで。1〜2文、80文字程度でお願いします。感情語は使わないこと。` +
+        `前置き・説明不要、セリフ本文のみ出力してください。`
+      : `以下は被検体について${CHARACTER_NAME}が記録していた記憶データの一つだ。「${memoryText}」\n\n` +
+        `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、ふと思い出したかのようにこの件へ触れ、被検体へ向けて一言言及せよ。` +
+        `催促や心配ではなく、観察・経過確認のニュアンスで。1〜2文、80文字程度。感情語は使わないこと。` +
+        `前置き・説明不要、セリフ本文のみ出力。`;
 
     try {
       const text = await aiHandler.generateSimple(prompt, 120);
@@ -1963,6 +1968,8 @@ function startFollowUp() {
         await ch.send(`<@${userId}> ${text}`);
         lastFollowUpTime = now;
         followUpCooldowns.set(userId, now);
+        // 一度触れた話題は以降のフォローアップ抽選から除外し、同じ話を何度も蒸し返さないようにする
+        memoryManager.markFollowedUp(userId, memoryText);
         // 実際に発した内容を記録しておく（記憶しておかないと後の会話で内部処理と食い違う）
         memoryManager.addProactiveStatement(userId, text);
         console.log(`[Bot] フォローアップ発動 [${userId}]: ${text.slice(0, 60)}`);
