@@ -1915,15 +1915,21 @@ function startTextMutter() {
     const topicsHint = getRecentTopicsHint();
     if (!topicsHint) return;
 
-    const prompt =
-      `${topicsHint}\n\n` +
-      `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、上記の最近の会話の流れに割り込むように自発的に一言コメントせよ。` +
-      `誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構わない。1〜2文、80文字程度。` +
-      (IS_PANTALONE ? `` : `パンタローネに言及する場合は「お前」または「あいつ」と呼び、「富者」「富者様」等の敬称・愛称は使わないこと。`) +
-      `行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力。`;
+    const prompt = IS_PANTALONE
+      ? `${topicsHint}\n\n` +
+        `パンタローネ（穏やかで丁寧、皮肉屋）として、上記の最近の会話の流れに割り込むように自発的に一言コメントしてください。` +
+        `誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構いません。1〜2文、80文字程度でお願いします。` +
+        `ドットーレに言及する場合は「博士」または「ドットーレ」と呼び、敬語（です・ます調）を崩さないこと。` +
+        `行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力してください。`
+      : `${topicsHint}\n\n` +
+        `${CHARACTER_NAME}（冷静・傲慢・知的な研究者）として、上記の最近の会話の流れに割り込むように自発的に一言コメントせよ。` +
+        `誰かへの返信ではなく、ふと思ったことを口にする独り言に近い形で構わない。1〜2文、80文字程度。` +
+        `パンタローネに言及する場合は「お前」または「あいつ」と呼び、「富者」「富者様」等の敬称・愛称は使わないこと。` +
+        `行動描写（括弧書き）を使ってもよい。前置き・説明不要、セリフ本文のみ出力。`;
 
     try {
-      const text = stripPantaloneEpithet(await aiHandler.generateSimple(prompt, 120));
+      const rawText = await aiHandler.generateSimple(prompt, 120);
+      const text = IS_PANTALONE ? normalizeDottoreName(rawText) : stripPantaloneEpithet(rawText);
       const targetCh = zatsuChannelId || [...targetChannelIds][0];
       if (!text || !targetCh) return;
       const ch = await client.channels.fetch(targetCh).catch(() => null);
