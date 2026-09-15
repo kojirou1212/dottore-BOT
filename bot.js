@@ -1284,15 +1284,31 @@ function interBotCounterpartName() {
   return IS_PANTALONE ? "ドットーレ" : "パンタローネ";
 }
 
-// その日が「対立セッション」の日かどうかを、日付文字列から決定論的に導く。
+// その日が「対立セッション」の日かどうかを、日付から決定論的に導く。
 // 状態を共有しない2プロセスが、通信なしに同じ判定へたどり着くための仕組み
 // （乱数だと初期化側と応答側で結果がズレてしまうため使えない）。
-const CONFLICT_SESSION_RATE = 0.10;
+// 目安として週1回程度（約7日に1回）。
+const CONFLICT_SESSION_RATE = 1 / 7;
+
+// 単純な文字コード合算の文字列ハッシュは、日付文字列のように大半の文字が共通する
+// 入力では出力が連続日で緩やかにしか変化せず、閾値判定の結果が同じ月内で何日も
+// 連続してhit/missしてしまう（実測で9/1〜9/19が丸ごと対立判定になる不具合が発生した）。
+// 整数（エポック日数）に対して十分な拡散を持つ整数ハッシュ（triple xorshift-multiply）を
+// 掛けることで、隣接する日付でも結果が大きく変わるようにする。
+function hashInt(x) {
+  x = (x ^ (x >>> 16)) >>> 0;
+  x = Math.imul(x, 0x45d9f3b) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  x = Math.imul(x, 0x45d9f3b) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  return x;
+}
+
 function isConflictDay() {
   const dateStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  let hash = 0;
-  for (let i = 0; i < dateStr.length; i++) hash = (hash * 31 + dateStr.charCodeAt(i)) >>> 0;
-  return (hash % 1000) / 1000 < CONFLICT_SESSION_RATE;
+  const daysSinceEpoch = Math.floor(new Date(`${dateStr}T00:00:00Z`).getTime() / 86400000);
+  const h = hashInt(daysSinceEpoch >>> 0);
+  return (h % 1000) / 1000 < CONFLICT_SESSION_RATE;
 }
 
 // 現在のJST時刻から、開始すべき／進行中とみなすべきセッションのモードを判定する。
