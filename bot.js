@@ -290,7 +290,7 @@ function getLanguageMatchHint(userMessage) {
   if (!languageName) return null;
   const toneNote = IS_PANTALONE
     ? `性格・口調のニュアンス（丁寧さ・皮肉っぽさなど）はその言語なりの自然な表現として保つこと。`
-    : `性格・口調のニュアンス（素っ気なさ・傲慢さ・命令口調など）はその言語なりの自然な表現として保つこと。特に英語では、礼儀正しく整った丁寧な英語（"I would prefer not to.""Please do as you wish."のような文体）に寄りがちだが、それは${CHARACTER_NAME}らしくない。短く、ぶっきらぼうで、くだけた言い回し（縮約形・言い切り・命令形）を使い、実際の日本語の口調（だ・である調、ぞんざいさ、高圧的な態度）が伝わる砕けた英語にすること。丁寧さや几帳面さを感じさせる表現は避けること。`;
+    : `性格・口調のニュアンス（素っ気なさ・傲慢さ・命令口調など）はその言語なりの自然な表現として保つこと。特に英語では、謙譲・へりくだった言い回しや丁寧語彙（"I would prefer not to.""Please do as you wish."のような文体）には絶対に寄らないこと——それは${CHARACTER_NAME}らしくない。ただし、必ずしも文を短く砕く（縮約形・断片的な言い切りだけにする）必要はない。実際の英語版ローカライズ（例："I suggest you speak to me in a more respectful tone. The mere fact of your utility does not make you indestructible."）は、知的で構文の整った言い回しを保ちながら、内容は冷淡・高圧的・命令的という形に近い。重要なのは文の長さや口語度ではなく「温度」——謝罪しない、へりくだらない、丁寧語彙を使わない、常に優位な立場から話す。その上で、実際の日本語の口調（だ・である調、ぞんざいさ、高圧的な態度）が伝わる英語にすること。`;
   return `【最優先指示・言語】相手の今回の発言は${languageName}で書かれている（発言が短い・単語だけの場合でも、この判定を信頼すること）。他のどの指示よりも優先して、今回の返答は日本語ではなく${languageName}で全文書くこと。日本語を一切混在させないこと。${toneNote}日本語の敬語表現をそのまま翻訳しようとしないこと。直前までの会話が別の言語（日本語や英語など）だった場合でも、それに引きずられず${languageName}に合わせること。`;
 }
 
@@ -3121,7 +3121,7 @@ client.on("messageCreate", async (message) => {
     // wireNoteとしても同じ指示を送る（history保存内容はクリーンなまま、API送信時のみ付加）。
     const wireNote = languageHint
       ? `この直前の発言は${languageName ?? "日本語以外の言語"}で書かれている。短い発言・単語だけの発言でもこの判定を信頼し、必ず${languageName ?? "その言語"}で返答すること（日本語不可）。直前までの会話の言語に引きずられないこと。` +
-        (IS_PANTALONE ? "" : `丁寧で整った英語ではなく、ぶっきらぼうで短い、${CHARACTER_NAME}らしい砕けた言い回しにすること。`)
+        (IS_PANTALONE ? "" : languageName === "英語" ? `謙譲・へりくだった丁寧語彙は避けつつ、知的で構文の整った、冷淡・高圧的な${CHARACTER_NAME}らしい英語にすること（文を無理に短く砕く必要はない）。` : "")
       : null;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint, wireNote });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
