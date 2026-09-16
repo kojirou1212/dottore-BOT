@@ -275,7 +275,7 @@ function getLanguageMatchHint(userMessage) {
   if (hasKana) return null;
   const hasNonJapaneseScript = /[A-Za-z]{2,}|[가-힣]|[Ѐ-ӿ]|[ؐ-ۿ]|[฀-๿]/.test(userMessage);
   if (!hasNonJapaneseScript) return null;
-  return `【言語】相手の今回の発言は日本語ではない（英語・韓国語など、別の言語で書かれていると思われる）。今回の返答は日本語ではなく、相手が使った言語に合わせて書くこと。性格・口調のニュアンス（丁寧さ・素っ気なさ・皮肉っぽさなど）はその言語なりの自然な表現として保ち、日本語の敬語表現をそのまま翻訳しようとしないこと。直前までの会話が別の言語（英語など）だった場合でも、それに引きずられず今回の発言の言語に合わせること。`;
+  return `【最優先指示・言語】相手の今回の発言は日本語ではない（英語・韓国語など、別の言語で書かれていると思われる）。他のどの指示よりも優先して、今回の返答は日本語ではなく、相手が使った言語に合わせて全文書くこと。日本語を一切混在させないこと。性格・口調のニュアンス（丁寧さ・素っ気なさ・皮肉っぽさなど）はその言語なりの自然な表現として保ち、日本語の敬語表現をそのまま翻訳しようとしないこと。直前までの会話が別の言語（日本語や英語など）だった場合でも、それに引きずられず今回の発言の言語に合わせること。`;
 }
 
 function getRecentTopicsHint() {
@@ -3099,7 +3099,11 @@ client.on("messageCreate", async (message) => {
     const statusHint = statusManager.getHint();
 
     const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint, antiRepetitionHint, languageHint].filter(Boolean).join("\n\n") || undefined;
-    const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
+    // systemHint内の言語指示だけでは埋もれて無視されることが実測で確認されたため（直前の
+    // 会話が英語だと、続く韓国語の発言にも英語で返してしまう等）、直近のユーザー発言に隣接する
+    // wireNoteとしても同じ指示を送る（history保存内容はクリーンなまま、API送信時のみ付加）。
+    const wireNote = languageHint ? "この直前の発言と同じ言語（日本語ではない場合、日本語以外）で返答すること。直前までの会話の言語に引きずられないこと。" : null;
+    const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint, wireNote });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
       try {

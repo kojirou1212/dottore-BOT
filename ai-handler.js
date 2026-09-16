@@ -78,13 +78,17 @@ class AIHandler {
     throw lastError;
   }
 
-  async generateResponse(userId, userMessage, { systemHint } = {}) {
+  async generateResponse(userId, userMessage, { systemHint, wireNote } = {}) {
     const history = this.getHistory(userId);
 
     while (history.length > 0 && history[history.length - 1].role === "user") {
       history.pop();
     }
 
+    // history／会話ログに保存するのは常にクリーンな発言内容のみ。wireNote（例：言語一致の
+    // 念押し）はAPIへ送るペイロードの末尾ユーザー発言にだけ添えて、保存済み履歴を汚さない
+    // （実測で、システムプロンプト内の指示だけでは埋もれて無視されやすい一方、直近のユーザー
+    // 発言に隣接させると効きが良い）。
     history.push({ role: "user", content: userMessage });
 
     const maxLen = this.config.grok.maxHistoryLength;
@@ -96,6 +100,7 @@ class AIHandler {
 
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
     const systemContent = `${this.config.ai.systemPrompt}\n\n現在の日時：${now}${systemHint ? `\n\n${systemHint}` : ""}`;
+    const wireUserMessage = wireNote ? `${userMessage}\n\n(${wireNote})` : userMessage;
     const apiKey = this.config.grok.apiKey;
     const url = "https://api.x.ai/v1/chat/completions";
     const chatHistory = history.slice(0, -1);
@@ -117,7 +122,7 @@ class AIHandler {
             messages: [
               { role: "system", content: systemContent },
               ...chatHistory,
-              { role: "user", content: userMessage },
+              { role: "user", content: wireUserMessage },
             ],
             max_tokens: this.config.grok.maxTokens,
           }),
