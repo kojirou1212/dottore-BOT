@@ -270,15 +270,28 @@ function normalizeDottoreName(text) {
 // アラビア文字・タイ文字）の有無で「日本語ではない」と判定する（判定根拠が明確な文字種に限定し、
 // 誤検知を避ける。例えば漢字のみの短い日本語返信を英語等に誤判定しないよう、ラテン文字は
 // 2文字以上の連続を要求する）。
+// スクリプトから具体的な言語名を特定する。短い1〜2単語の発言（例：韓国語で
+// 「박사」だけ等）では、モデルに「日本語ではない言語」とだけ伝えても実際にどの言語か
+// 自力で推測させることになり、文字数が少ないほど推測に失敗して日本語に戻ってしまう
+// 現象が実測で確認されたため、判定できる場合は言語名まで明示する。
+function detectNonJapaneseLanguageName(userMessage) {
+  if (/[가-힣]/.test(userMessage)) return "韓国語";
+  if (/[Ѐ-ӿ]/.test(userMessage)) return "ロシア語";
+  if (/[ؐ-ۿ]/.test(userMessage)) return "アラビア語";
+  if (/[฀-๿]/.test(userMessage)) return "タイ語";
+  if (/[A-Za-z]{2,}/.test(userMessage)) return "英語";
+  return null;
+}
+
 function getLanguageMatchHint(userMessage) {
   const hasKana = /[぀-ヿ]/.test(userMessage);
   if (hasKana) return null;
-  const hasNonJapaneseScript = /[A-Za-z]{2,}|[가-힣]|[Ѐ-ӿ]|[ؐ-ۿ]|[฀-๿]/.test(userMessage);
-  if (!hasNonJapaneseScript) return null;
+  const languageName = detectNonJapaneseLanguageName(userMessage);
+  if (!languageName) return null;
   const toneNote = IS_PANTALONE
     ? `性格・口調のニュアンス（丁寧さ・皮肉っぽさなど）はその言語なりの自然な表現として保つこと。`
     : `性格・口調のニュアンス（素っ気なさ・傲慢さ・命令口調など）はその言語なりの自然な表現として保つこと。特に英語では、礼儀正しく整った丁寧な英語（"I would prefer not to.""Please do as you wish."のような文体）に寄りがちだが、それは${CHARACTER_NAME}らしくない。短く、ぶっきらぼうで、くだけた言い回し（縮約形・言い切り・命令形）を使い、実際の日本語の口調（だ・である調、ぞんざいさ、高圧的な態度）が伝わる砕けた英語にすること。丁寧さや几帳面さを感じさせる表現は避けること。`;
-  return `【最優先指示・言語】相手の今回の発言は日本語ではない（英語・韓国語など、別の言語で書かれていると思われる）。他のどの指示よりも優先して、今回の返答は日本語ではなく、相手が使った言語に合わせて全文書くこと。日本語を一切混在させないこと。${toneNote}日本語の敬語表現をそのまま翻訳しようとしないこと。直前までの会話が別の言語（日本語や英語など）だった場合でも、それに引きずられず今回の発言の言語に合わせること。`;
+  return `【最優先指示・言語】相手の今回の発言は${languageName}で書かれている（発言が短い・単語だけの場合でも、この判定を信頼すること）。他のどの指示よりも優先して、今回の返答は日本語ではなく${languageName}で全文書くこと。日本語を一切混在させないこと。${toneNote}日本語の敬語表現をそのまま翻訳しようとしないこと。直前までの会話が別の言語（日本語や英語など）だった場合でも、それに引きずられず${languageName}に合わせること。`;
 }
 
 function getRecentTopicsHint() {
@@ -3075,6 +3088,7 @@ client.on("messageCreate", async (message) => {
       `直前までの自分の返答が長くても、それに引きずられて長くしないこと。会話が進んでも1返答あたりの分量は増やさない。`;
 
     const languageHint = getLanguageMatchHint(content);
+    const languageName = languageHint ? detectNonJapaneseLanguageName(content) : null;
 
     let returningUserHint = null;
     if (config.features?.returningUser !== false && prevLastSeen && !returningUserGreeted.has(userId)) {
@@ -3106,7 +3120,7 @@ client.on("messageCreate", async (message) => {
     // 会話が英語だと、続く韓国語の発言にも英語で返してしまう等）、直近のユーザー発言に隣接する
     // wireNoteとしても同じ指示を送る（history保存内容はクリーンなまま、API送信時のみ付加）。
     const wireNote = languageHint
-      ? "この直前の発言と同じ言語（日本語ではない場合、日本語以外）で返答すること。直前までの会話の言語に引きずられないこと。" +
+      ? `この直前の発言は${languageName ?? "日本語以外の言語"}で書かれている。短い発言・単語だけの発言でもこの判定を信頼し、必ず${languageName ?? "その言語"}で返答すること（日本語不可）。直前までの会話の言語に引きずられないこと。` +
         (IS_PANTALONE ? "" : `丁寧で整った英語ではなく、ぶっきらぼうで短い、${CHARACTER_NAME}らしい砕けた言い回しにすること。`)
       : null;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint, wireNote });
