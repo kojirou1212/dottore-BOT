@@ -260,6 +260,17 @@ function normalizeDottoreName(text) {
   return text.replace(/[Dd]ottore/g, "ドットーレ").replace(/ドクター/g, "ドットーレ");
 }
 
+// ユーザーが日本語以外（英語など）で書いてきた場合、その言語に合わせて返答するよう
+// 毎ターン明示的に念押しする。system-prompt.txt冒頭にも同趣旨の指示があるが、それだけでは
+// 他の大量の日本語指示・日本語の会話履歴に埋もれて無視されがちなため（特に非推論系モデルで
+// 実測）、直近の発言内容から動的に判定してsystemHintの一部として毎回注入する。
+function getLanguageMatchHint(userMessage) {
+  const hasJapanese = /[぀-ヿ㐀-鿿]/.test(userMessage);
+  const hasLatinLetters = /[A-Za-z]{3,}/.test(userMessage);
+  if (hasJapanese || !hasLatinLetters) return null;
+  return `【言語】相手の今回の発言は日本語ではない（英語など、別の言語で書かれていると思われる）。今回の返答は日本語ではなく、相手が使った言語に合わせて書くこと。性格・口調のニュアンス（丁寧さ・素っ気なさ・皮肉っぽさなど）はその言語なりの自然な表現として保ち、日本語の敬語表現をそのまま翻訳しようとしないこと。`;
+}
+
 function getRecentTopicsHint() {
   const now = Date.now();
   const lines = [];
@@ -3053,6 +3064,8 @@ client.on("messageCreate", async (message) => {
       `返答を長くしてよいのは、${CHARACTER_NAME}が本当に知的な興味を引かれた時だけ。` +
       `直前までの自分の返答が長くても、それに引きずられて長くしないこと。会話が進んでも1返答あたりの分量は増やさない。`;
 
+    const languageHint = getLanguageMatchHint(content);
+
     let returningUserHint = null;
     if (config.features?.returningUser !== false && prevLastSeen && !returningUserGreeted.has(userId)) {
       const daysDiff = Math.floor((Date.now() - new Date(prevLastSeen).getTime()) / (1000 * 60 * 60 * 24));
@@ -3078,7 +3091,7 @@ client.on("messageCreate", async (message) => {
 
     const statusHint = statusManager.getHint();
 
-    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint, antiRepetitionHint].filter(Boolean).join("\n\n") || undefined;
+    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint, antiRepetitionHint, languageHint].filter(Boolean).join("\n\n") || undefined;
     const reply = await aiHandler.generateResponse(userId, effectiveContent, { systemHint });
     const chunks = reply.length <= 2000 ? [reply] : splitMessage(reply, 2000);
     for (let i = 0; i < chunks.length; i++) {
