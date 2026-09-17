@@ -381,6 +381,39 @@ function getAntiRepetitionHint(userId) {
   return parts.join("\n");
 }
 
+// ─── 長期平行線の折れヒント ─────────────────────────────────────────────
+// 論理・哲学的な話題を粘り強く返してくる相手だと、反論・問い詰めが一方的に
+// 続いたまま終わりが見えなくなることがある（一理を認める描写が一度もないまま
+// 何往復も続く）。直近の自分の返答を遡り、最後に「一理を認める」ような
+// 譲歩が出てから何ターン経ったかを数え、一定数を超えたら今回だけ折れさせる。
+const CONCESSION_RE = /一理|認め(る|た|ます|よう)|譲歩|わからなくはない|否定はしない|悪くない(視点|指摘|発想|考え)/;
+const CONCESSION_STREAK_THRESHOLD = 5;
+
+// 文単位で判定し、「お前は〜認めるのか」のような相手への問い詰め文は
+// 自分自身の譲歩ではないため除外する（末尾が疑問形の文は対象外）。
+function hasConcession(text) {
+  return text.split(/(?<=[。！？])/).some(
+    s => CONCESSION_RE.test(s) && !QUESTION_END_RE.test(s.trim()));
+}
+
+function getConcessionHint(userId) {
+  const history = aiHandler.getHistory(userId);
+  const assistantMsgs = history.filter(h => h.role === "assistant").map(h => (h.content || "").trim());
+  if (assistantMsgs.length < CONCESSION_STREAK_THRESHOLD) return "";
+
+  let streak = 0;
+  for (let i = assistantMsgs.length - 1; i >= 0; i--) {
+    if (hasConcession(assistantMsgs[i])) break;
+    streak++;
+  }
+  if (streak < CONCESSION_STREAK_THRESHOLD) return "";
+
+  return `【今回の返答で意識すること（長期の平行線）】\n` +
+    `この相手とのやり取りが、こちらが一切譲らず反論・問い詰めを続ける展開のまま${streak}往復以上続いている。` +
+    `今回は完全に同意する必要はないが、相手の言い分のどこかに一理あることを、皮肉げに・渋々ながら認めること。` +
+    `態度を急に軟化させすぎず、認めた上でなお自分の見立てや違和感は残してよい。相手に新たな反証や次の質問を重ねて畳みかけないこと。`;
+}
+
 // ─── 観察メモ更新（5会話ごと or 重要イベント時、クールダウン付き）────────────
 const observationCooldowns = new Map(); // userId → lastUpdateTimestamp
 
@@ -3074,6 +3107,7 @@ client.on("messageCreate", async (message) => {
     const topicsHint = getRecentTopicsHint();
     const crossMutterEventHint = getCrossMutterEventHint(message.channelId);
     const antiRepetitionHint = getAntiRepetitionHint(userId);
+    const concessionHint = getConcessionHint(userId);
     const userSpecificHint = userHints[userId] ?? null;
     const timeHint = getTimeBasedMoodHint();
 
@@ -3115,7 +3149,7 @@ client.on("messageCreate", async (message) => {
 
     const statusHint = statusManager.getHint();
 
-    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint, antiRepetitionHint, languageHint].filter(Boolean).join("\n\n") || undefined;
+    const systemHint = [loreHint, profileHint, statusHint, userBaseHint, memoryHint, savedMemoryHint, proactiveHint, userSpecificHint, sentimentHint, contradictionHint, crossMutterEventHint, topicsHint, timeHint, returningUserHint, lengthDisciplineHint, antiRepetitionHint, concessionHint, languageHint].filter(Boolean).join("\n\n") || undefined;
     // systemHint内の言語指示だけでは埋もれて無視されることが実測で確認されたため（直前の
     // 会話が英語だと、続く韓国語の発言にも英語で返してしまう等）、直近のユーザー発言に隣接する
     // wireNoteとしても同じ指示を送る（history保存内容はクリーンなまま、API送信時のみ付加）。
